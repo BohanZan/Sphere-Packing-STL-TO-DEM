@@ -1,0 +1,12 @@
+# Sphere Packing of STL Model (STL-to-DEM)
+
+> author: ZAN Bohan
+
+## 
+
+
+## Reference
+
+[1] Optimisation of blade type spreaders for powder bed preparation in additive manufacturing using DEM simulations S. Haeri Powder Technology Vol 321, pp. 94-104, (2017) http://dx.doi.org/10.1016/j.powtec.2017.08.011
+
+[2] An efficient dense spheres packing method in complex domains for 3D DEM simulations. Li N, He L, Xia M, et al. Powder Technology, 2026: 122583. https://doi.org/10.1016/j.powtec.2026.122583.
