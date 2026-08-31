@@ -1,150 +1,75 @@
-function [ assembly, masses, totVolSph, mI ] = populateSpheres( fileName, nNodes, scaleFactor, smoothFact, writeTec, ...
-                                                                writeLammpsTemp, lammpsType, writeStlScaled, rho, findSTLmI )
+function [assembly, masses, totalVolume, inertia, report] = spawnSpheres(model, radii, maxAttempts, buffer, options)
+%SPAWNSPHERES Static non-overlapping packing in a closed STL domain.
+%   RADII is an ordered radius sequence.  Each value is attempted exactly
+%   once in the initial-placement phase; remaining values are offered to the
+%   boundary-refilling phase.  MODEL may be an STL filename or a mesh struct.
 
-                                                                [vertices,faces,~,~] = stlRead(fileName);
+if nargin < 5, options = struct; end
+if nargin < 4 || isempty(buffer), buffer = 0; end
+if nargin < 3 || isempty(maxAttempts), maxAttempts = 1000; end
+validateattributes(radii, {'numeric'}, {'vector','real','finite','positive'});
+validateattributes(maxAttempts, {'numeric'}, {'scalar','integer','positive'});
+radii = radii(:);
+options = spDefaultOptions(options, maxAttempts, buffer);
+context = spBuildContext(model, max(radii), options.buffer, options.tolerance);
+state = spEmptyState(context);
 
-vertices = vertices*scaleFactor;
+nextRadius = 1;
+failedInitialBatches = 0;
+while nextRadius <= numel(radii) && failedInitialBatches <= options.maxInitialFailures
+    before = state.count;
+    [state, nextRadius] = spInitialPlacement(context, state, radii, nextRadius, options);
+    if state.count == before
+        failedInitialBatches = failedInitialBatches + 1;
+        break;
+    end
+    state = spRelax(context, state, options.gravity, options, true);
+    state = spRelax(context, state, options.gravity, options, false);
+end
 
-%find a bounding box
-xlow=min(vertices(:,1));
-ylow=min(vertices(:,2));
-zlow=min(vertices(:,3));
+if nextRadius <= numel(radii)
+    [state, nextRadius] = spRefill(context, state, radii, nextRadius, options);
+end
 
-xhigh=max(vertices(:,1));
-yhigh=max(vertices(:,2));
-zhigh=max(vertices(:,3));
+assembly = [state.centres.'; state.radii.'];
+masses = (4/3) * pi * state.radii.'.^3;
+totalVolume = sum(masses);
+inertia = spInertia(state.centres, state.radii, masses.');
+report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ...
+    'unplacedCount', numel(radii) - state.count, 'stopReason', 'completed', ...
+    'capacityWarning', false, 'nextUnplacedRadiusIndex', nextRadius, ...
+    'initialFailures', failedInitialBatches, 'refillPasses', options.maxRefillPasses);
+if state.count < numel(radii)
+    report.stopReason = 'capacity_reached';
+    report.capacityWarning = true;
+    warning('SpherePacking:CapacityReached', ...
+        'Requested %d spheres; placed %d. Remaining radii do not fit this geometry.', ...
+        numel(radii), state.count);
+end
+end
 
-Lx = xhigh-xlow;
-Ly = yhigh-ylow;
-Lz = zhigh-zlow;
-
-disp(['Bounding Box Dimensions Lx=', num2str(Lx), '; Ly=', num2str(Ly), ...
-                                                  '; Lz=', num2str(Lz)]);
-
-%Calculate some parameters
-rSph = Lx/2/nNodes; %Radius of potential spherical cells
-
-nRayY = floor(Ly/Lx*nNodes)+1; %Nomber of place holder lines in y-direction
-nRayZ = floor(Lz/Lx*nNodes)+1; %Nomber of place holder lines in z-direction
-
-%Determine the direction and initial origin of eah ray, direction is 
-%arbitrarily set to +x, origins are distributed unifromely on x=xlow plane
-%This should not be changed
-initCoords = zeros(3,nRayY,nRayZ);
-initDirs = zeros(3,nRayY,nRayZ);
-for k = 1:nRayZ
-    for j = 1:nRayY
-        initCoords(:,j,k)=[xlow-1e13*eps(xlow); ylow+(j-1)*2*rSph; zlow+(k-1)*2*rSph]; 
-        initDirs(:,j,k)=[Lx;0;0]; 
+function options = spDefaultOptions(options, maxAttempts, buffer)
+defaults = struct('buffer', buffer, 'maxAttempts', maxAttempts, ...
+    'gravity', [0 0 -1], 'tolerance', 1e-9, 'compressionTolerance', 1e-5, ...
+    'maxCompressionSweeps', 100, 'shakeSweeps', 2, 'maxInitialFailures', 2, ...
+    'maxRefillPasses', 3, 'randomSeed', []);
+names = fieldnames(defaults);
+for k = 1:numel(names)
+    if ~isfield(options, names{k}) || isempty(options.(names{k}))
+        options.(names{k}) = defaults.(names{k});
     end
 end
-
-%generate spheres along each ray (+x)
-initSphCoords = zeros(nNodes+1,nRayY,nRayZ);
-for k = 1:nRayZ
-    for j = 1:nRayY
-        for n = 1:nNodes+1
-            initSphCoords(n,j,k)=xlow+(n-1)*2*rSph; 
-        end
-    end
+options.gravity = options.gravity(:).' / norm(options.gravity);
+if ~isempty(options.randomSeed), rng(options.randomSeed, 'twister'); end
 end
 
-%Just for testing a very simple crude Monte Carlo algorithm to calculte mI
-%of the original STL, set findSTLmI to zero since this may take very long
-%specially if the stl is not convex
-[stlVol,~] = stlVolume(vertices',faces');
-%stlMass = stlVol*rho;
-if(findSTLmI) 
-    [STLmI, STLCoM] = calculateSTLmI(vertices,faces,stlVol,rho,10000);
+function inertia = spInertia(centres, radii, masses)
+inertia = zeros(3);
+if isempty(radii), return; end
+com = centres.' * masses / sum(masses);
+for k = 1:numel(radii)
+    d = centres(k,:).' - com;
+    inertia = inertia + (2/5)*masses(k)*radii(k)^2*eye(3) + ...
+        masses(k)*(dot(d,d)*eye(3) - d*d.');
 end
-
-%For each ray determine the intersection
-sz = size(faces);
-nface= sz(1);
-
-%intersections of each ray witht the collection of trinagles in +x
-maxIntersectPerRay = 10; %Increase of crashed
-allIntersects = zeros(maxIntersectPerRay, nRayY, nRayZ);
-nIntersectRay = zeros(nRayY,nRayZ);
-
-for k = 1:nRayZ
-    for j = 1:nRayY
-        direction = initDirs(:,j,k);
-        origin    = initCoords(:,j,k);
-        ncIntersect = 0;
-        for facet=1:nface
-            vert = vertices(faces(facet,:),:);
-            [flag, ~, ~, t] = rayTriangleIntersection(origin, direction, vert(1,:)', vert(2,:)', vert(3,:)', eps(Lx));    
-            if(flag)
-                intersection = origin + t*direction;
-                ncIntersect = ncIntersect+1;
-                allIntersects(ncIntersect,j,k) = intersection(1);
-            end
-        end
-        nIntersectRay(j,k) = ncIntersect;
-        allIntersects(1:ncIntersect,j,k) = sort(allIntersects(1:ncIntersect,j,k));
-    end
 end
-
-%bFlagSphere = 0: surface node, <7: inernal node, =7 
-bFlagSphere = zeros(nNodes+1,nRayY,nRayZ);
-
-for k = 1:nRayZ
-    for j = 1:nRayY
-        if(nIntersectRay(j,k)) %otherwise bFlagSphere is already set to 0
-            for nn = 1:2:nIntersectRay(j,k)
-                for n = 1:nNodes+1
-                    if(allIntersects(nn,j,k) < initSphCoords(n,j,k) && ...
-                            allIntersects(nn+1,j,k) > initSphCoords(n,j,k) )
-                        bFlagSphere(n,j,k) = bFlagSphere(n,j,k) + 1;
-                        %check to see if boundary
-                        if(n ~=1)
-                            if(bFlagSphere(n-1,j,k))
-                                bFlagSphere(n-1,j,k) = bFlagSphere(n-1,j,k) + 1;
-                                bFlagSphere(n,j,k) = bFlagSphere(n,j,k) + 1;
-                            end
-                        end
-                        if(n ~= nNodes+1)
-                            if(bFlagSphere(n+1,j,k))
-                                bFlagSphere(n+1,j,k) = bFlagSphere(n+1,j,k) + 1;
-                                bFlagSphere(n,j,k) = bFlagSphere(n,j,k) + 1;
-                            end
-                        end
-                        
-                        if(j~=1)
-                            if(bFlagSphere(n,j-1,k))
-                                bFlagSphere(n,j-1,k) = bFlagSphere(n,j-1,k) + 1;
-                                bFlagSphere(n,j,k) = bFlagSphere(n,j,k) + 1;
-                            end
-                        end
-                        
-                        if(j ~= nRayY)
-                            if(bFlagSphere(n,j+1,k))
-                                bFlagSphere(n,j+1,k) = bFlagSphere(n,j+1,k) + 1;
-                                bFlagSphere(n,j,k) = bFlagSphere(n,j,k) + 1;
-                            end
-                        end
-                        
-                        if(k ~= 1)
-                            if(bFlagSphere(n,j,k-1))
-                                bFlagSphere(n,j,k-1) = bFlagSphere(n,j,k-1) + 1;
-                                bFlagSphere(n,j,k) = bFlagSphere(n,j,k) + 1;
-                            end
-                        end
-                        
-                        if(k ~= nRayZ)
-                            if(bFlagSphere(n,j,k+1))
-                                bFlagSphere(n,j,k+1) = bFlagSphere(n,j,k+1) + 1;
-                                bFlagSphere(n,j,k) = bFlagSphere(n,j,k) + 1;
-                            end
-                        end
-                        
-                    end
-                    
-                end
-            end
-        end
-        
-    end
-end
-
