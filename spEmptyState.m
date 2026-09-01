@@ -1,4 +1,4 @@
-function state = spEmptyState(context)
+function state = spEmptyState(~)
 state=struct('centres',zeros(0,3),'radii',zeros(0,1),'count',0,...
-    'sphereCells',{cell(context.cellCount(1),context.cellCount(2),context.cellCount(3))});
+    'sphereCells',containers.Map('KeyType','char','ValueType','any'));
 end

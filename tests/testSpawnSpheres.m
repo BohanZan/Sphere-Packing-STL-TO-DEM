@@ -71,6 +71,15 @@ verifyEqual(testCase, assembly(1:3, :) * masses.' / sum(masses), zeros(3,1), 'Ab
 verifySize(testCase, inertia, [3 3]);
 end
 
+function testSpatialIndexDoesNotAllocateEmptyCells(testCase)
+% Catches a dense cell(nx,ny,nz) allocation for large STL-to-radius ratios.
+context = spBuildContext(cubeMesh(1e6), 1e-3, 0, 1e-9);
+
+verifyClass(testCase, context.triangleCells, 'containers.Map');
+verifyClass(testCase, context.xyCells, 'containers.Map');
+verifyLessThan(testCase, context.triangleCells.Count, 1000);
+end
+
 function mesh = cubeMesh(sideLength)
 v = [0 0 0; sideLength 0 0; sideLength sideLength 0; 0 sideLength 0; ...
      0 0 sideLength; sideLength 0 sideLength; sideLength sideLength sideLength; 0 sideLength sideLength];

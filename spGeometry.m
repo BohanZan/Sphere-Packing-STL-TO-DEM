@@ -3,6 +3,7 @@ function value = spGeometry(action, context, varargin)
 switch action
     case 'cell', value = cellOf(context, varargin{1});
     case 'nearby', value = nearby(context, varargin{1}, varargin{2});
+    case 'add', addToCell(varargin{1}, varargin{2}, varargin{3}); value = [];
     case 'inside', value = inside(context, varargin{1});
     case 'triangleHit', value = triangleHit(context, varargin{1}, varargin{2}, varargin{3});
     otherwise, error('SpherePacking:UnknownGeometryAction','Unknown geometry action.');
@@ -17,7 +18,8 @@ ids=[];
 for i=max(1,idx(1)-1):min(c.cellCount(1),idx(1)+1)
  for j=max(1,idx(2)-1):min(c.cellCount(2),idx(2)+1)
   for k=max(1,idx(3)-1):min(c.cellCount(3),idx(3)+1)
-   ids=[ids,cells{i,j,k}]; %#ok<AGROW>
+   key=sprintf('%d,%d,%d',i,j,k);
+   if isKey(cells,key), ids=[ids,cells(key)]; end %#ok<AGROW>
   end
  end
 end
@@ -25,13 +27,20 @@ ids=unique(ids);
 end
 function answer=inside(c,p)
 idx=min(max(floor((p(1:2)-c.lower(1:2))/c.xySize)+1,1),c.xyCount);
-ids=c.xyCells{idx(1),idx(2)}; z=[];
+key=sprintf('%d,%d',idx(1),idx(2));
+if isKey(c.xyCells,key), ids=c.xyCells(key); else, ids=[]; end
+z=[];
 for id=ids
  tri=c.vertices(c.faces(id,:),:); [hit,h]=verticalHit(p,tri,c.tolerance);
  if hit && h<p(3)-c.tolerance, z(end+1)=h; end %#ok<AGROW>
 end
 if isempty(z), answer=false; return; end
 z=sort(z); answer=mod(1+sum(diff(z)>c.tolerance),2)==1;
+end
+function addToCell(cells,idx,id)
+key=sprintf('%d,%d,%d',idx(1),idx(2),idx(3));
+if isKey(cells,key), ids=cells(key); else, ids=[]; end
+cells(key)=[ids id];
 end
 function [hit,z]=verticalHit(p,t,tol)
 a=t(1,1:2); u=t(2,1:2)-a; v=t(3,1:2)-a; q=p(1:2)-a;
