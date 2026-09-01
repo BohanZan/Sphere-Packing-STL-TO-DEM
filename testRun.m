@@ -1,13 +1,43 @@
-%TESTRUN Execute the complete static sphere-packing regression suite.
-% Run this file from MATLAB, or use: run('DEMTools/SpherePacking/testRun.m')
+clear;
+clc;
+close all;
 
-thisDirectory = fileparts(mfilename('fullpath'));
-addpath(thisDirectory);
-addpath(fullfile(thisDirectory, 'tests'));
+%% ============================================================
+%  Input STL
+% =============================================================
+fileName = './Objects/seated-buddha-scanned-by-delgrande-and-leak/source/Lily-Maria/Lily-Maria.stl';
 
-results = runtests(fullfile(thisDirectory, 'tests'));
-table(results)
-assert(all([results.Passed]), 'SpherePacking:TestsFailed', ...
-    'At least one SpherePacking regression test failed.');
+%% ============================================================
+%  Sphere-packing parameters
+% =============================================================
+% One entry represents one requested DEM sphere. Replace this array later
+% with radii sampled from a particle-size frequency distribution.
+nTarget = 500;
+uniformRadius = 0.002;
+radii = repmat(uniformRadius, nTarget, 1);
 
-fprintf('SpherePacking tests passed: %d tests.\n', numel(results));
+maxAttempts = 2000;
+buffer = 0.0;
+density = 1.0;
+
+options = struct;
+options.gravity = [0, 0, -1];
+options.density = density;
+options.maxCompressionSweeps = 100;
+options.shakeSweeps = 2;
+options.maxRefillPasses = 3;
+options.outputDirectory = './results';
+options.outputPrefix = 'Lily_Maria_packing';
+% options.randomSeed = 42; % Uncomment to make a run reproducible.
+
+%% ============================================================
+%  Run static non-overlapping sphere packing
+% =============================================================
+[assembly, masses, totalVolume, inertia, report] = ...
+    spawnSpheres(fileName, radii, maxAttempts, buffer, options);
+
+%% ============================================================
+%  Result files
+% =============================================================
+fprintf('\nCSV result files:\n');
+fprintf('  %s\n', report.outputFiles{:});

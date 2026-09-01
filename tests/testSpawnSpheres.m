@@ -57,6 +57,20 @@ verifyTrue(testCase, ismember('requested_count', summaryTable.Properties.Variabl
 clear cleanup
 end
 
+function testReportProvidesCentredAssemblyProperties(testCase)
+% Catches returning world-coordinate output without the reported COM data.
+rng(23, 'twister');
+[assembly, masses, volume, inertia, report] = ...
+    spawnSpheres(cubeMesh(20), [0.5; 0.75; 1.0], 300, 0.01);
+
+verifyEqual(testCase, report.boundingBoxDimensions, [20 20 20], 'AbsTol', 1e-12);
+verifyEqual(testCase, report.sphereAssemblyVolume, volume, 'AbsTol', 1e-12);
+verifyEqual(testCase, report.totalMass, sum(masses), 'AbsTol', 1e-12);
+verifyLessThan(testCase, norm(report.centreOfMassAfterShift), 1e-10);
+verifyEqual(testCase, assembly(1:3, :) * masses.' / sum(masses), zeros(3,1), 'AbsTol', 1e-10);
+verifySize(testCase, inertia, [3 3]);
+end
+
 function mesh = cubeMesh(sideLength)
 v = [0 0 0; sideLength 0 0; sideLength sideLength 0; 0 sideLength 0; ...
      0 0 sideLength; sideLength 0 sideLength; sideLength sideLength sideLength; 0 sideLength sideLength];

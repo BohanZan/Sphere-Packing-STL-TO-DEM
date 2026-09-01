@@ -44,6 +44,9 @@ end
 function answer=triangleHit(c,p,r,ids)
 answer=false;
 for id=ids
+ if ~isscalar(id) || id < 1 || id > size(c.faces,1) || id ~= fix(id)
+  error('SpherePacking:InvalidTriangleIndex', 'Triangle index %s is invalid for %d faces.', mat2str(id), size(c.faces,1));
+ end
  if pointTriDistance(p,c.vertices(c.faces(id,:),:)) < r-c.tolerance
   answer=true; return;
  end

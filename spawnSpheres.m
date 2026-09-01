@@ -31,14 +31,26 @@ if nextRadius <= numel(radii)
     [state, nextRadius] = spRefill(context, state, radii, nextRadius, options);
 end
 
+worldCentres = state.centres;
+unitVolumes = (4/3) * pi * state.radii.^3;
+masses = (options.density * unitVolumes).';
+totalVolume = sum(unitVolumes);
+centreOfMass = zeros(3, 1);
+if state.count > 0
+    centreOfMass = worldCentres.' * masses.' / sum(masses);
+    state.centres = worldCentres - centreOfMass.';
+end
 assembly = [state.centres.'; state.radii.'];
-masses = (4/3) * pi * state.radii.'.^3;
-totalVolume = sum(masses);
 inertia = spInertia(state.centres, state.radii, masses.');
+stlVolume = spSignedMeshVolume(context.vertices, context.faces);
 report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ...
     'unplacedCount', numel(radii) - state.count, 'stopReason', 'completed', ...
     'capacityWarning', false, 'nextUnplacedRadiusIndex', nextRadius, ...
     'initialFailures', failedInitialBatches, 'refillPasses', options.maxRefillPasses, ...
+    'boundingBoxDimensions', context.upper-context.lower, 'stlVolume', stlVolume, ...
+    'sphereAssemblyVolume', totalVolume, 'totalMass', sum(masses), ...
+    'centreOfMass', centreOfMass, 'centreOfMassAfterShift', ...
+    assembly(1:3,:) * masses.' / max(sum(masses), eps), ...
     'outputFiles', {{}});
 if state.count < numel(radii)
     report.stopReason = 'capacity_reached';
@@ -48,28 +60,54 @@ if state.count < numel(radii)
         numel(radii), state.count);
 end
 report.outputFiles = spWriteCsv(model, assembly, masses, totalVolume, inertia, report, options);
+spPrintSummary(report, inertia);
 end
 
 function options = spDefaultOptions(options, maxAttempts, buffer, model)
 defaults = struct('buffer', buffer, 'maxAttempts', maxAttempts, ...
     'gravity', [0 0 -1], 'tolerance', 1e-9, 'compressionTolerance', 1e-5, ...
     'maxCompressionSweeps', 100, 'shakeSweeps', 2, 'maxInitialFailures', 2, ...
-    'maxRefillPasses', 3, 'randomSeed', [], 'outputDirectory', '', 'outputPrefix', '');
+    'maxRefillPasses', 3, 'randomSeed', [], 'outputDirectory', '', 'outputPrefix', '', 'density', 1.0);
 names = fieldnames(defaults);
 for k = 1:numel(names)
     if ~isfield(options, names{k}) || isempty(options.(names{k}))
         options.(names{k}) = defaults.(names{k});
     end
 end
+
 options.gravity = options.gravity(:).' / norm(options.gravity);
 if ~isempty(options.randomSeed), rng(options.randomSeed, 'twister'); end
 if isempty(options.outputDirectory) && (ischar(model) || (isstring(model) && isscalar(model)))
     [options.outputDirectory, inferredPrefix] = fileparts(char(model));
     if isempty(options.outputPrefix), options.outputPrefix = inferredPrefix; end
 end
+
 if ~isempty(options.outputDirectory) && isempty(options.outputPrefix)
     options.outputPrefix = 'sphere_packing';
 end
+end
+
+function volume = spSignedMeshVolume(vertices, faces)
+volume = 0;
+for id = 1:size(faces, 1)
+    triangle = vertices(faces(id,:), :);
+    volume = volume + dot(triangle(1,:), cross(triangle(2,:), triangle(3,:))) / 6;
+end
+end
+
+function spPrintSummary(report, inertia)
+d = report.boundingBoxDimensions;
+fprintf('Bounding Box Dimensions Lx=%.8g; Ly=%.8g; Lz=%.8g\n', d(1), d(2), d(3));
+fprintf('STL Volume: %.8e , Sphere Assembly Volume: %.8e\n', report.stlVolume, report.sphereAssemblyVolume);
+fprintf('Sum of sphere masses: %.8e , total mass: %.8e\n', report.totalMass, report.totalMass);
+disp('MI of the cluster:'); disp(inertia);
+fprintf('CoM of the cluster: %.8g %.8g %.8g\n', report.centreOfMass);
+fprintf('CoM of the cluster after shifting: %.8g %.8g %.8g\n', report.centreOfMassAfterShift);
+fprintf('\n========================================\nFinished\n');
+fprintf('Number of final spheres = %d\n', report.acceptedCount);
+fprintf('Assembly volume = %.8e\n', report.sphereAssemblyVolume);
+disp('Moment of inertia tensor:'); disp(inertia);
+fprintf('========================================\n');
 end
 
 function inertia = spInertia(centres, radii, masses)
