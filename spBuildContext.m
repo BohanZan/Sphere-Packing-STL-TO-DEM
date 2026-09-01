@@ -10,7 +10,7 @@ end
 % Keep the grid sparse in both storage and construction. A cell may hold
 % many spheres; making it at least as wide as the largest face prevents a
 % large STL facet from being expanded into billions of indexed cells.
-cellSize = max([2 * maxRadius + buffer; max(triangleExtent, [], 1)]);
+cellSize = max(2 * maxRadius + buffer, max(triangleExtent(:)));
 count = max(1, ceil((upper - lower) / cellSize));
 % A sparse hash is essential: the geometric grid can have billions of
 % possible cells while only cells touched by STL faces need storage.

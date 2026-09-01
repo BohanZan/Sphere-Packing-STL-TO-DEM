@@ -87,6 +87,16 @@ verifyClass(testCase, context.xyCells, 'containers.Map');
 verifyLessThan(testCase, context.triangleCells.Count, 1000);
 end
 
+function testSpatialGridUsesScalarWidthForNonCubicFaces(testCase)
+% Catches concatenating a scalar sphere diameter with a 1-by-3 face extent.
+mesh = struct('vertices', [0 0 0; 6 0 0; 0 2 1; 0 0 4], ...
+    'faces', [1 2 3; 1 4 2; 1 3 4; 2 4 3]);
+context = spBuildContext(mesh, 0.5, 0, 1e-9);
+
+verifySize(testCase, context.cellSize, [1 1]);
+verifyEqual(testCase, context.cellSize, 6, 'AbsTol', 1e-12);
+end
+
 function mesh = cubeMesh(sideLength)
 v = [0 0 0; sideLength 0 0; sideLength sideLength 0; 0 sideLength 0; ...
      0 0 sideLength; sideLength 0 sideLength; sideLength sideLength sideLength; 0 sideLength sideLength];
