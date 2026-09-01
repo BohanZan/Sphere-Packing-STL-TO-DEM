@@ -36,5 +36,5 @@ end
 function n=inwardNormal(context,tri)
 n=cross(tri(2,:)-tri(1,:),tri(3,:)-tri(1,:)); n=n/norm(n);
 probe=mean(tri,1)+n*max(context.tolerance*100,1e-8*context.cellSize);
-if ~spGeometry('inside',context,probe), n=-n; end
+if ~spPointInside(context,probe), n=-n; end
 end

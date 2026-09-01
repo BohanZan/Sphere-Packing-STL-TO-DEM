@@ -1,5 +1,5 @@
 function state = spAddSphere(context, state, centre, radius)
 state.count=state.count+1; state.centres(state.count,:)=centre; state.radii(state.count,1)=radius;
-idx=spGeometry('cell',context,centre);
-spGeometry('add',context,state.sphereCells,idx,state.count);
+idx=spCellIndex(context,centre);
+spHashInsert(state.sphereCells,idx,state.count);
 end
