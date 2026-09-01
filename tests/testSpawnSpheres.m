@@ -46,18 +46,21 @@ options = struct('outputDirectory', outputDirectory, 'outputPrefix', 'cube');
 
 [assembly, ~, ~, ~, report] = spawnSpheres(cubeMesh(20), [0.5; 0.75], 300, 0.01, options);
 
-verifyEqual(testCase, numel(report.outputFiles), 3);
+verifyEqual(testCase, numel(report.outputFiles), 4);
 verifyTrue(testCase, all(endsWith(report.outputFiles, '.csv')));
 sphereTable = readtable(report.outputFiles{1});
 summaryTable = readtable(report.outputFiles{2});
-cellTable = readtable(report.outputFiles{3});
+gridPointTable = readtable(report.outputFiles{3});
+gridCellTable = readtable(report.outputFiles{4});
 verifyEqual(testCase, sphereTable.Properties.VariableNames, ...
     {'id', 'x', 'y', 'z', 'radius', 'diameter', 'mass'});
 verifyEqual(testCase, height(sphereTable), size(assembly, 2));
 verifyTrue(testCase, ismember('requested_count', summaryTable.Properties.VariableNames));
-verifyEqual(testCase, cellTable.Properties.VariableNames, ...
-    {'ix', 'iy', 'iz', 'xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax', 'sphere_count', 'triangle_count'});
-verifyGreaterThan(testCase, height(cellTable), 0);
+verifyEqual(testCase, gridPointTable.Properties.VariableNames, {'point_id', 'x', 'y', 'z'});
+verifyEqual(testCase, gridCellTable.Properties.VariableNames, ...
+    {'cell_id', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'sphere_count', 'triangle_count'});
+verifyGreaterThan(testCase, height(gridCellTable), 0);
+verifyEqual(testCase, height(gridPointTable), 8 * height(gridCellTable));
 clear cleanup
 end
 
