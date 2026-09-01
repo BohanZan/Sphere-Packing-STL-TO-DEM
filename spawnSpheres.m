@@ -10,7 +10,7 @@ if nargin < 3 || isempty(maxAttempts), maxAttempts = 1000; end
 validateattributes(radii, {'numeric'}, {'vector','real','finite','positive'});
 validateattributes(maxAttempts, {'numeric'}, {'scalar','integer','positive'});
 radii = radii(:);
-options = spDefaultOptions(options, maxAttempts, buffer);
+options = spDefaultOptions(options, maxAttempts, buffer, model);
 context = spBuildContext(model, max(radii), options.buffer, options.tolerance);
 state = spEmptyState(context);
 
@@ -38,7 +38,8 @@ inertia = spInertia(state.centres, state.radii, masses.');
 report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ...
     'unplacedCount', numel(radii) - state.count, 'stopReason', 'completed', ...
     'capacityWarning', false, 'nextUnplacedRadiusIndex', nextRadius, ...
-    'initialFailures', failedInitialBatches, 'refillPasses', options.maxRefillPasses);
+    'initialFailures', failedInitialBatches, 'refillPasses', options.maxRefillPasses, ...
+    'outputFiles', {{}});
 if state.count < numel(radii)
     report.stopReason = 'capacity_reached';
     report.capacityWarning = true;
@@ -46,13 +47,14 @@ if state.count < numel(radii)
         'Requested %d spheres; placed %d. Remaining radii do not fit this geometry.', ...
         numel(radii), state.count);
 end
+report.outputFiles = spWriteCsv(model, assembly, masses, totalVolume, inertia, report, options);
 end
 
-function options = spDefaultOptions(options, maxAttempts, buffer)
+function options = spDefaultOptions(options, maxAttempts, buffer, model)
 defaults = struct('buffer', buffer, 'maxAttempts', maxAttempts, ...
     'gravity', [0 0 -1], 'tolerance', 1e-9, 'compressionTolerance', 1e-5, ...
     'maxCompressionSweeps', 100, 'shakeSweeps', 2, 'maxInitialFailures', 2, ...
-    'maxRefillPasses', 3, 'randomSeed', []);
+    'maxRefillPasses', 3, 'randomSeed', [], 'outputDirectory', '', 'outputPrefix', '');
 names = fieldnames(defaults);
 for k = 1:numel(names)
     if ~isfield(options, names{k}) || isempty(options.(names{k}))
@@ -61,6 +63,13 @@ for k = 1:numel(names)
 end
 options.gravity = options.gravity(:).' / norm(options.gravity);
 if ~isempty(options.randomSeed), rng(options.randomSeed, 'twister'); end
+if isempty(options.outputDirectory) && (ischar(model) || (isstring(model) && isscalar(model)))
+    [options.outputDirectory, inferredPrefix] = fileparts(char(model));
+    if isempty(options.outputPrefix), options.outputPrefix = inferredPrefix; end
+end
+if ~isempty(options.outputDirectory) && isempty(options.outputPrefix)
+    options.outputPrefix = 'sphere_packing';
+end
 end
 
 function inertia = spInertia(centres, radii, masses)
