@@ -2,6 +2,10 @@ function context = spBuildContext(model, maxRadius, buffer, tolerance)
 %SPBUILDCONTEXT Preprocess STL triangles into 2-D and 3-D uniform grids.
 [vertices, faces] = readMesh(model);
 lower = min(vertices, [], 1); upper = max(vertices, [], 1);
+modelScale = max(upper - lower);
+% The public tolerance is relative to model size. Store a length tolerance
+% internally so the same options work for micrometre and metre STL files.
+tolerance = max(tolerance * modelScale, 64 * eps(max(abs(vertices(:)))));
 triangleExtent = zeros(size(faces,1), 3);
 for id = 1:size(faces,1)
     triangle = vertices(faces(id,:), :);

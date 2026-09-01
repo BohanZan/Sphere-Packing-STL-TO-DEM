@@ -38,10 +38,17 @@ totalVolume = sum(unitVolumes);
 centreOfMass = zeros(3, 1);
 if state.count > 0
     centreOfMass = worldCentres.' * masses.' / sum(masses);
-    state.centres = worldCentres - centreOfMass.';
 end
-assembly = [state.centres.'; state.radii.'];
-inertia = spInertia(state.centres, state.radii, masses.');
+centredCentres = worldCentres - centreOfMass.';
+if strcmp(options.coordinateFrame, 'world')
+    outputCentres = worldCentres;
+    coordinateShift = zeros(1, 3);
+else
+    outputCentres = centredCentres;
+    coordinateShift = centreOfMass.';
+end
+assembly = [outputCentres.'; state.radii.'];
+inertia = spInertia(centredCentres, state.radii, masses.');
 stlVolume = spSignedMeshVolume(context.vertices, context.faces);
 report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ...
     'unplacedCount', numel(radii) - state.count, 'stopReason', 'completed', ...
@@ -49,8 +56,9 @@ report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ..
     'initialFailures', failedInitialBatches, 'refillPasses', options.maxRefillPasses, ...
     'boundingBoxDimensions', context.upper-context.lower, 'stlVolume', stlVolume, ...
     'sphereAssemblyVolume', totalVolume, 'totalMass', sum(masses), ...
-    'centreOfMass', centreOfMass, 'centreOfMassAfterShift', ...
-    assembly(1:3,:) * masses.' / max(sum(masses), eps), ...
+    'centreOfMass', centreOfMass, 'coordinateFrame', options.coordinateFrame, ...
+    'coordinateShift', coordinateShift, 'centreOfMassAfterShift', ...
+    centredCentres.' * masses.' / max(sum(masses), eps), ...
     'outputFiles', {{}});
 if state.count < numel(radii)
     report.stopReason = 'capacity_reached';
@@ -59,7 +67,7 @@ if state.count < numel(radii)
         'Requested %d spheres; placed %d. Remaining radii do not fit this geometry.', ...
         numel(radii), state.count);
 end
-report.outputFiles = spWriteCsv(model, assembly, masses, totalVolume, inertia, report, options, context, state);
+report.outputFiles = spWriteCsv(model, assembly, masses, totalVolume, inertia, report, options, context, state, coordinateShift);
 spPrintSummary(report, inertia);
 end
 
@@ -67,7 +75,8 @@ function options = spDefaultOptions(options, maxAttempts, buffer, model)
 defaults = struct('buffer', buffer, 'maxAttempts', maxAttempts, ...
     'gravity', [0 0 -1], 'tolerance', 1e-9, 'compressionTolerance', 1e-5, ...
     'maxCompressionSweeps', 100, 'shakeSweeps', 2, 'maxInitialFailures', 2, ...
-    'maxRefillPasses', 3, 'randomSeed', [], 'outputDirectory', '', 'outputPrefix', '', 'density', 1.0);
+    'maxRefillPasses', 3, 'randomSeed', [], 'outputDirectory', '', 'outputPrefix', '', ...
+    'density', 1.0, 'coordinateFrame', 'center_of_mass');
 names = fieldnames(defaults);
 for k = 1:numel(names)
     if ~isfield(options, names{k}) || isempty(options.(names{k}))
@@ -76,6 +85,11 @@ for k = 1:numel(names)
 end
 
 options.gravity = options.gravity(:).' / norm(options.gravity);
+options.coordinateFrame = char(lower(string(options.coordinateFrame)));
+if ~ismember(options.coordinateFrame, {'world', 'center_of_mass'})
+    error('SpherePacking:InvalidCoordinateFrame', ...
+        'options.coordinateFrame must be ''world'' or ''center_of_mass''.');
+end
 if ~isempty(options.randomSeed), rng(options.randomSeed, 'twister'); end
 if isempty(options.outputDirectory) && (ischar(model) || (isstring(model) && isscalar(model)))
     [options.outputDirectory, inferredPrefix] = fileparts(char(model));

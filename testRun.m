@@ -5,18 +5,18 @@ close all;
 %% ============================================================
 %  Input STL
 % =============================================================
-fileName = './Objects/seated-buddha-scanned-by-delgrande-and-leak/source/Lily-Maria/Lily-Maria.stl';
+fileName = '.\inputs\ironParticle\ironParticle.stl';
 
 %% ============================================================
 %  Sphere-packing parameters
 % =============================================================
 % One entry represents one requested DEM sphere. Replace this array later
 % with radii sampled from a particle-size frequency distribution.
-nTarget = 500;
-uniformRadius = 0.002;
+nTarget = 1000;
+uniformRadius = 1.0e-6;
 radii = repmat(uniformRadius, nTarget, 1);
 
-maxAttempts = 2000;
+maxAttempts = 100;
 buffer = 0.0;
 density = 1.0;
 
@@ -28,6 +28,7 @@ options.shakeSweeps = 2;
 options.maxRefillPasses = 3;
 options.outputDirectory = './results';
 options.outputPrefix = 'Lily_Maria_packing';
+options.coordinateFrame = 'world'; % Choose 'world' or 'center_of_mass'.
 % options.randomSeed = 42; % Uncomment to make a run reproducible.
 
 %% ============================================================

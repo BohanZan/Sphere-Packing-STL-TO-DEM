@@ -78,6 +78,44 @@ verifyEqual(testCase, assembly(1:3, :) * masses.' / sum(masses), zeros(3,1), 'Ab
 verifySize(testCase, inertia, [3 3]);
 end
 
+function testCoordinateFrameKeepsSphereAndGridCsvCoordinatesAligned(testCase)
+% Catches exporting centred spheres alongside world-coordinate grid points.
+worldDirectory = tempname;
+centredDirectory = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(worldDirectory));
+cleanup2 = onCleanup(@() removeOutputDirectory(centredDirectory));
+radii = [0.5; 0.75; 1.0];
+
+worldOptions = struct('outputDirectory', worldDirectory, 'outputPrefix', 'cube', ...
+    'randomSeed', 47, 'coordinateFrame', 'world');
+[worldAssembly, worldMasses, ~, ~, worldReport] = ...
+    spawnSpheres(cubeMesh(20), radii, 300, 0.01, worldOptions);
+
+centredOptions = struct('outputDirectory', centredDirectory, 'outputPrefix', 'cube', ...
+    'randomSeed', 47, 'coordinateFrame', 'center_of_mass');
+[centredAssembly, centredMasses, ~, ~, centredReport] = ...
+    spawnSpheres(cubeMesh(20), radii, 300, 0.01, centredOptions);
+
+verifyEqual(testCase, worldAssembly(1:3, :) * worldMasses.' / sum(worldMasses), ...
+    worldReport.centreOfMass, 'AbsTol', 1e-10);
+verifyEqual(testCase, centredAssembly(1:3, :) * centredMasses.' / sum(centredMasses), ...
+    zeros(3, 1), 'AbsTol', 1e-10);
+
+worldSphereTable = readtable(worldReport.outputFiles{1});
+centredSphereTable = readtable(centredReport.outputFiles{1});
+worldGridTable = readtable(worldReport.outputFiles{3});
+centredGridTable = readtable(centredReport.outputFiles{3});
+shift = worldReport.centreOfMass.';
+verifyEqual(testCase, centredSphereTable{:, {'x', 'y', 'z'}}, ...
+    worldSphereTable{:, {'x', 'y', 'z'}} - shift, 'AbsTol', 1e-10);
+verifyEqual(testCase, centredGridTable{:, {'x', 'y', 'z'}}, ...
+    worldGridTable{:, {'x', 'y', 'z'}} - shift, 'AbsTol', 1e-10);
+verifyEqual(testCase, worldReport.coordinateFrame, 'world');
+verifyEqual(testCase, centredReport.coordinateFrame, 'center_of_mass');
+
+clear cleanup cleanup2
+end
+
 function testSpatialIndexDoesNotAllocateEmptyCells(testCase)
 % Catches a dense cell(nx,ny,nz) allocation for large STL-to-radius ratios.
 context = spBuildContext(cubeMesh(1e6), 1e-3, 0, 1e-9);
@@ -95,6 +133,16 @@ context = spBuildContext(mesh, 0.5, 0, 1e-9);
 
 verifySize(testCase, context.cellSize, [1 1]);
 verifyEqual(testCase, context.cellSize, 6, 'AbsTol', 1e-12);
+end
+
+function testInsidePredicateIsScaleIndependent(testCase)
+% Catches treating a length tolerance as an area tolerance for tiny STL meshes.
+vertices = 1e-6 * [0 0 0; 1 0 0; 0 1 0; 0 0 1];
+faces = [1 3 2; 1 2 4; 1 4 3; 2 3 4];
+context = spBuildContext(struct('vertices', vertices, 'faces', faces), 0.05e-6, 0, 1e-9);
+
+verifyTrue(testCase, spPointInside(context, [0.1 0.1 0.1]*1e-6));
+verifyFalse(testCase, spPointInside(context, [0.8 0.8 0.8]*1e-6));
 end
 
 function mesh = cubeMesh(sideLength)

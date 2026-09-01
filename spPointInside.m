@@ -31,7 +31,7 @@ ab = triangle(2,1:2) - a;
 ac = triangle(3,1:2) - a;
 ap = point(1:2) - a;
 determinant = ab(1)*ac(2) - ab(2)*ac(1);
-if abs(determinant) <= tolerance
+if abs(determinant) <= tolerance^2
     hit = false;
     zHit = NaN;
     return;
