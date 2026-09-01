@@ -1,5 +1,6 @@
 function ids = spHashNeighbours(context, hash, index)
 %SPHASHNEIGHBOURS Return unique IDs from INDEX and its 26 neighbours.
+%Search the local 3-by-3-by-3 block, clipped at domain boundaries.
 ids = [];
 for ix = max(1, index(1)-1):min(context.cellCount(1), index(1)+1)
     for iy = max(1, index(2)-1):min(context.cellCount(2), index(2)+1)
@@ -11,5 +12,7 @@ for ix = max(1, index(1)-1):min(context.cellCount(1), index(1)+1)
         end
     end
 end
+
+%Remove duplicate IDs collected from adjacent sparse cells.
 ids = unique(ids);
 end

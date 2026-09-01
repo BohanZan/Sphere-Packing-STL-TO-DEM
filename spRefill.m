@@ -1,10 +1,13 @@
 function [state, nextRadius] = spRefill(context, state, radii, nextRadius, options)
 % Algorithm 4: place remaining prescribed radii tangent to active faces.
+%Use gravity-facing surface triangles to refill the difficult boundary region.
 active=spActiveTriangles(context,options.gravity);
 for pass=1:options.maxRefillPasses
+ %Record whether this refill sweep found any new feasible sphere centres.
  before=state.count;
  while nextRadius<=numel(radii)
   r=radii(nextRadius); placed=false;
+  %Sample points on active triangles and offset them along the inward normal.
   for attempt=1:options.maxAttempts
    id=active(randi(numel(active))); tri=context.vertices(context.faces(id,:),:);
    q=randomTrianglePoint(tri); n=inwardNormal(context,tri);
@@ -15,16 +18,22 @@ for pass=1:options.maxRefillPasses
     break;
    end
   end
+  %End the current sweep if the unresolved radius cannot be placed.
   if ~placed, break; end
   nextRadius=nextRadius+1;
  end
+ %Avoid further relaxation when this pass made no geometric progress.
  if state.count==before, return; end
+
+ %Settle the newly added boundary spheres before the next refill pass.
  state=spRelax(context,state,options.gravity,options,true);
  state=spRelax(context,state,options.gravity,options,false);
  if nextRadius>numel(radii), return; end
 end
 end
 function ids=spActiveTriangles(context,gravity)
+%SPACTIVETRIANGLES Select faces whose inward normal points with gravity.
+%Fall back to all faces for geometries with no directional match.
 ids=[];
 for id=1:size(context.faces,1)
  tri=context.vertices(context.faces(id,:),:); n=inwardNormal(context,tri);
@@ -33,10 +42,13 @@ end
 if isempty(ids), ids=1:size(context.faces,1); end
 end
 function q=randomTrianglePoint(tri)
+%RANDOMTRIANGLEPOINT Draw a uniform point from a triangular face.
+%Reflect samples across u+v=1 to preserve uniform barycentric density.
 u=rand; v=rand; if u+v>1, u=1-u; v=1-v; end
 q=tri(1,:)+u*(tri(2,:)-tri(1,:))+v*(tri(3,:)-tri(1,:));
 end
 function n=inwardNormal(context,tri)
+%INWARDNORMAL Orient the face normal using a short point-in-solid probe.
 n=cross(tri(2,:)-tri(1,:),tri(3,:)-tri(1,:)); n=n/norm(n);
 probe=mean(tri,1)+n*max(context.tolerance*100,1e-8*context.cellSize);
 if ~spPointInside(context,probe), n=-n; end

@@ -4,6 +4,7 @@ function [assembly, masses, totalVolume, inertia, report] = spawnSpheres(model, 
 %   once in the initial-placement phase; remaining values are offered to the
 %   boundary-refilling phase.  MODEL may be an STL filename or a mesh struct.
 
+%Normalise optional inputs and validate the prescribed sphere-size sequence.
 if nargin < 5, options = struct; end
 if nargin < 4 || isempty(buffer), buffer = 0; end
 if nargin < 3 || isempty(maxAttempts), maxAttempts = 1000; end
@@ -11,9 +12,12 @@ validateattributes(radii, {'numeric'}, {'vector','real','finite','positive'});
 validateattributes(maxAttempts, {'numeric'}, {'scalar','integer','positive'});
 radii = radii(:);
 options = spDefaultOptions(options, maxAttempts, buffer, model);
+
+%Read the STL geometry and initialise the sparse spatial-hash state.
 context = spBuildContext(model, max(radii), options.buffer, options.tolerance);
 state = spEmptyState(context);
 
+%Populate the interior from random trial centres, followed by relaxation.
 nextRadius = 1;
 failedInitialBatches = 0;
 while nextRadius <= numel(radii) && failedInitialBatches <= options.maxInitialFailures
@@ -27,10 +31,12 @@ while nextRadius <= numel(radii) && failedInitialBatches <= options.maxInitialFa
     state = spRelax(context, state, options.gravity, options, false);
 end
 
+%Try unresolved radii again by generating candidates on active surface faces.
 if nextRadius <= numel(radii)
     [state, nextRadius] = spRefill(context, state, radii, nextRadius, options);
 end
 
+%Calculate volume, mass and centre of mass in the original world frame.
 worldCentres = state.centres;
 unitVolumes = (4/3) * pi * state.radii.^3;
 masses = (options.density * unitVolumes).';
@@ -40,6 +46,8 @@ if state.count > 0
     centreOfMass = worldCentres.' * masses.' / sum(masses);
 end
 centredCentres = worldCentres - centreOfMass.';
+
+%Choose one coordinate frame consistently for both sphere and grid outputs.
 if strcmp(options.coordinateFrame, 'world')
     outputCentres = worldCentres;
     coordinateShift = zeros(1, 3);
@@ -47,6 +55,8 @@ else
     outputCentres = centredCentres;
     coordinateShift = centreOfMass.';
 end
+
+%Assemble the DEM array and calculate inertia about the physical centre of mass.
 assembly = [outputCentres.'; state.radii.'];
 inertia = spInertia(centredCentres, state.radii, masses.');
 stlVolume = spSignedMeshVolume(context.vertices, context.faces);
@@ -60,6 +70,8 @@ report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ..
     'coordinateShift', coordinateShift, 'centreOfMassAfterShift', ...
     centredCentres.' * masses.' / max(sum(masses), eps), ...
     'outputFiles', {{}});
+
+%Record incomplete filling without discarding the valid partial assembly.
 if state.count < numel(radii)
     report.stopReason = 'capacity_reached';
     report.capacityWarning = true;
@@ -67,11 +79,15 @@ if state.count < numel(radii)
         'Requested %d spheres; placed %d. Remaining radii do not fit this geometry.', ...
         numel(radii), state.count);
 end
+
+%Write persistent results and retain the established final academic summary.
 report.outputFiles = spWriteCsv(model, assembly, masses, totalVolume, inertia, report, options, context, state, coordinateShift);
 spPrintSummary(report, inertia);
 end
 
 function options = spDefaultOptions(options, maxAttempts, buffer, model)
+%SPDEFAULTOPTIONS Fill optional packing controls and normalise derived fields.
+%Define physical, numerical and output defaults for a reproducible run.
 defaults = struct('buffer', buffer, 'maxAttempts', maxAttempts, ...
     'gravity', [0 0 -1], 'tolerance', 1e-9, 'compressionTolerance', 1e-5, ...
     'maxCompressionSweeps', 100, 'shakeSweeps', 2, 'maxInitialFailures', 2, ...
@@ -84,24 +100,30 @@ for k = 1:numel(names)
     end
 end
 
+%Normalise the gravity direction and validate the requested output frame.
 options.gravity = options.gravity(:).' / norm(options.gravity);
 options.coordinateFrame = char(lower(string(options.coordinateFrame)));
 if ~ismember(options.coordinateFrame, {'world', 'center_of_mass'})
     error('SpherePacking:InvalidCoordinateFrame', ...
         'options.coordinateFrame must be ''world'' or ''center_of_mass''.');
 end
+
+%Apply an optional random seed and infer output names from an STL filename.
 if ~isempty(options.randomSeed), rng(options.randomSeed, 'twister'); end
 if isempty(options.outputDirectory) && (ischar(model) || (isstring(model) && isscalar(model)))
     [options.outputDirectory, inferredPrefix] = fileparts(char(model));
     if isempty(options.outputPrefix), options.outputPrefix = inferredPrefix; end
 end
 
+%Use a generic prefix when an output directory was supplied explicitly.
 if ~isempty(options.outputDirectory) && isempty(options.outputPrefix)
     options.outputPrefix = 'sphere_packing';
 end
 end
 
 function volume = spSignedMeshVolume(vertices, faces)
+%SPSIGNEDMESHVOLUME Calculate oriented STL volume from triangular tetrahedra.
+%Sum the signed volumes formed by every triangle and the coordinate origin.
 volume = 0;
 for id = 1:size(faces, 1)
     triangle = vertices(faces(id,:), :);
@@ -110,6 +132,8 @@ end
 end
 
 function spPrintSummary(report, inertia)
+%SPPRINTSUMMARY Print the retained end-of-run packing report.
+%Report global geometry, mass properties and final packing status.
 d = report.boundingBoxDimensions;
 fprintf('Bounding Box Dimensions Lx=%.8g; Ly=%.8g; Lz=%.8g\n', d(1), d(2), d(3));
 fprintf('STL Volume: %.8e , Sphere Assembly Volume: %.8e\n', report.stlVolume, report.sphereAssemblyVolume);
@@ -125,8 +149,12 @@ fprintf('========================================\n');
 end
 
 function inertia = spInertia(centres, radii, masses)
+%SPINERTIA Calculate the inertia tensor of the sphere assembly about its CoM.
+%Return a zero tensor directly for an empty packing.
 inertia = zeros(3);
 if isempty(radii), return; end
+
+%Apply each sphere's intrinsic inertia and parallel-axis contribution.
 com = centres.' * masses / sum(masses);
 for k = 1:numel(radii)
     d = centres(k,:).' - com;

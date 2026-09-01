@@ -1,5 +1,6 @@
 function tests = testSpawnSpheres
 % Regression tests for the random non-overlapping sphere insertion core.
+%Return local function tests so every physical invariant is run independently.
 tests = functiontests(localfunctions);
 end
 
@@ -167,6 +168,8 @@ verifyFalse(testCase, spPointInside(context, [0.8 0.8 0.8]*1e-6));
 end
 
 function mesh = cubeMesh(sideLength)
+%CUBEMESH Construct a consistently oriented closed cube for deterministic tests.
+%Use two triangular faces per side to match the STL mesh representation.
 v = [0 0 0; sideLength 0 0; sideLength sideLength 0; 0 sideLength 0; ...
      0 0 sideLength; sideLength 0 sideLength; sideLength sideLength sideLength; 0 sideLength sideLength];
 f = [1 3 2; 1 4 3; 5 6 7; 5 7 8; 1 2 6; 1 6 5; ...
@@ -175,6 +178,7 @@ mesh = struct('vertices', v, 'faces', f);
 end
 
 function removeOutputDirectory(pathName)
+%REMOVEOUTPUTDIRECTORY Delete one test-only temporary output directory.
 if isfolder(pathName)
     rmdir(pathName, 's');
 end
