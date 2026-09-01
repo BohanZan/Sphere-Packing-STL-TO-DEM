@@ -46,14 +46,18 @@ options = struct('outputDirectory', outputDirectory, 'outputPrefix', 'cube');
 
 [assembly, ~, ~, ~, report] = spawnSpheres(cubeMesh(20), [0.5; 0.75], 300, 0.01, options);
 
-verifyEqual(testCase, numel(report.outputFiles), 2);
+verifyEqual(testCase, numel(report.outputFiles), 3);
 verifyTrue(testCase, all(endsWith(report.outputFiles, '.csv')));
 sphereTable = readtable(report.outputFiles{1});
 summaryTable = readtable(report.outputFiles{2});
+cellTable = readtable(report.outputFiles{3});
 verifyEqual(testCase, sphereTable.Properties.VariableNames, ...
     {'id', 'x', 'y', 'z', 'radius', 'diameter', 'mass'});
 verifyEqual(testCase, height(sphereTable), size(assembly, 2));
 verifyTrue(testCase, ismember('requested_count', summaryTable.Properties.VariableNames));
+verifyEqual(testCase, cellTable.Properties.VariableNames, ...
+    {'ix', 'iy', 'iz', 'xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax', 'sphere_count', 'triangle_count'});
+verifyGreaterThan(testCase, height(cellTable), 0);
 clear cleanup
 end
 

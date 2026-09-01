@@ -59,7 +59,7 @@ if state.count < numel(radii)
         'Requested %d spheres; placed %d. Remaining radii do not fit this geometry.', ...
         numel(radii), state.count);
 end
-report.outputFiles = spWriteCsv(model, assembly, masses, totalVolume, inertia, report, options);
+report.outputFiles = spWriteCsv(model, assembly, masses, totalVolume, inertia, report, options, context, state);
 spPrintSummary(report, inertia);
 end
 
