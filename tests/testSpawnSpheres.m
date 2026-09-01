@@ -4,6 +4,62 @@ function tests = testSpawnSpheres
 tests = functiontests(localfunctions);
 end
 
+function testFixedSeedPackingMatchesReferenceFixture(testCase)
+%FIXEDSEEDPACKINGMATCHESREFERENCEFIXTURE Guard future optimisations exactly.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+fixture = fullfile(root, 'tests', 'fixtures', 'seed53_cube_reference.mat');
+if ~isfile(fixture)
+    verifyTrue(testCase, false, ...
+        'The pre-optimisation fixed-seed fixture must exist before this test runs.');
+    return;
+end
+
+loaded = load(fixture, 'expected');
+out = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(out));
+options = struct('randomSeed', 53, 'outputDirectory', out, ...
+    'outputPrefix', 'reference', 'coordinateFrame', 'world', ...
+    'maxCompressionSweeps', 8, 'shakeSweeps', 1, 'maxRefillPasses', 1);
+[assembly, masses, totalVolume, inertia, report] = ...
+    spawnSpheres(spTestCubeMesh(20), [0.5; 0.75; 1.0; 1.25], 300, 0.01, options);
+
+verifyEqual(testCase, assembly, loaded.expected.assembly, 'AbsTol', 1e-12);
+verifyEqual(testCase, masses, loaded.expected.masses, 'AbsTol', 1e-12);
+verifyEqual(testCase, totalVolume, loaded.expected.totalVolume, 'AbsTol', 1e-12);
+verifyEqual(testCase, inertia, loaded.expected.inertia, 'AbsTol', 1e-12);
+verifyEqual(testCase, report.acceptedCount, loaded.expected.acceptedCount);
+verifyEqual(testCase, report.unplacedCount, loaded.expected.unplacedCount);
+verifyEqual(testCase, report.centreOfMass, loaded.expected.centreOfMass, 'AbsTol', 1e-12);
+verifyEqual(testCase, report.coordinateFrame, loaded.expected.coordinateFrame);
+clear cleanup
+end
+
+function testBenchmarkReturnsOneDeterministicSmokeSample(testCase)
+%BENCHMARKRETURNSONEDETERMINISTICSMOKESAMPLE Exercise the benchmark harness.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+if isempty(which('benchmarkSpherePacking'))
+    verifyNotEmpty(testCase, which('benchmarkSpherePacking'), ...
+        'Task 1 must provide the benchmarkSpherePacking smoke-test harness.');
+    return;
+end
+
+config = struct('model', spTestCubeMesh(20), 'radii', [0.5; 0.75], ...
+    'maxAttempts', 300, 'buffer', 0.01, ...
+    'options', struct('randomSeed', 59, 'maxCompressionSweeps', 3, ...
+    'shakeSweeps', 0, 'maxRefillPasses', 0, 'coordinateFrame', 'world'));
+result = benchmarkSpherePacking(1, config);
+expectedVolume = (4/3) * pi * sum(config.radii.^3);
+
+verifySize(testCase, result.seconds, [1 1]);
+verifyTrue(testCase, isfinite(result.seconds));
+verifyEqual(testCase, result.acceptedCount, 2);
+verifyEqual(testCase, result.sphereVolumeFraction, expectedVolume / 20^3, ...
+    'AbsTol', 1e-12);
+verifyEqual(testCase, result.medianSeconds, result.seconds, 'AbsTol', 1e-12);
+end
+
 function testRequestedRadiiArePreservedAndDoNotOverlap(testCase)
 % Catches accepting a sphere with a changed radius or an intersecting pair.
 rng(31, 'twister');
