@@ -9,7 +9,10 @@ for pass=1:options.maxRefillPasses
    id=active(randi(numel(active))); tri=context.vertices(context.faces(id,:),:);
    q=randomTrianglePoint(tri); n=inwardNormal(context,tri);
    if spCanPlace(context,state,q+r*n,r)
-    state=spAddSphere(context,state,q+r*n,r); placed=true; break;
+    state=spAddSphere(context,state,q+r*n,r);
+    state=spReportFillProgress(state,numel(radii));
+    placed=true;
+    break;
    end
   end
   if ~placed, break; end

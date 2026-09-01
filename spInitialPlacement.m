@@ -6,7 +6,12 @@ while nextRadius<=numel(radii)
  if any(lo>hi), return; end
  for attempt=1:options.maxAttempts
   p=lo+rand(1,3).*(hi-lo);
-  if spCanPlace(context,state,p,r), state=spAddSphere(context,state,p,r); placed=true; break; end
+  if spCanPlace(context,state,p,r)
+   state=spAddSphere(context,state,p,r);
+   state=spReportFillProgress(state,numel(radii));
+   placed=true;
+   break;
+  end
  end
  if ~placed, return; end
  nextRadius=nextRadius+1;

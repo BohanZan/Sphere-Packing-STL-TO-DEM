@@ -1,4 +1,5 @@
 function state = spEmptyState(~)
 state=struct('centres',zeros(0,3),'radii',zeros(0,1),'count',0,...
-    'sphereCells',containers.Map('KeyType','char','ValueType','any'));
+    'sphereCells',containers.Map('KeyType','char','ValueType','any'),...
+    'nextProgressPercent',25);
 end

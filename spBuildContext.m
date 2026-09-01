@@ -3,6 +3,11 @@ function context = spBuildContext(model, maxRadius, buffer, tolerance)
 [vertices, faces] = readMesh(model);
 lower = min(vertices, [], 1); upper = max(vertices, [], 1);
 modelScale = max(upper - lower);
+dimensions = upper - lower;
+fprintf('\n========================================\n');
+fprintf('Geometry Preprocessing\n');
+fprintf('Bounding Box Dimensions Lx=%.8g; Ly=%.8g; Lz=%.8g\n', ...
+    dimensions(1), dimensions(2), dimensions(3));
 % The public tolerance is relative to model size. Store a length tolerance
 % internally so the same options work for micrometre and metre STL files.
 tolerance = max(tolerance * modelScale, 64 * eps(max(abs(vertices(:)))));
@@ -49,6 +54,14 @@ end
 context=struct('vertices',vertices,'faces',faces,'lower',lower,'upper',upper,...
     'cellSize',cellSize,'cellCount',count,'triangleCells',{triCells},...
     'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells},'tolerance',tolerance);
+fprintf('Spatial Grid Discretisation\n');
+fprintf('Grid Cell Edge Length = %.8g\n', cellSize);
+fprintf('Grid Counts Nx=%d; Ny=%d; Nz=%d\n', count(1), count(2), count(3));
+fprintf('Total Spatial Cells = %.0f\n', prod(double(count)));
+fprintf('Ray Grid Cell Edge Length = %.8g\n', xySize);
+fprintf('Ray Grid Counts Nx=%d; Ny=%d; Total=%d\n', ...
+    xyCount(1), xyCount(2), prod(double(xyCount)));
+fprintf('========================================\n');
     function index=toCell(p)
         index=min(max(floor((p-lower)/cellSize)+1,1),count);
     end

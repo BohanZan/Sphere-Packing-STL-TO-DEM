@@ -78,6 +78,27 @@ verifyEqual(testCase, assembly(1:3, :) * masses.' / sum(masses), zeros(3,1), 'Ab
 verifySize(testCase, inertia, [3 3]);
 end
 
+function testPrintsPreprocessingAndQuarterFillProgress(testCase)
+% Catches delaying domain/grid status until the final summary or printing duplicate milestones.
+outputDirectory = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(outputDirectory));
+options = struct('outputDirectory', outputDirectory, 'outputPrefix', 'progress', ...
+    'randomSeed', 53, 'coordinateFrame', 'world');
+
+text = evalc('spawnSpheres(cubeMesh(20), [0.5; 0.5; 0.5; 0.5], 300, 0.01, options);');
+
+verifyEqual(testCase, count(text, 'Bounding Box Dimensions'), 2);
+verifyEqual(testCase, count(text, 'Spatial Grid Discretisation'), 1);
+verifyEqual(testCase, count(text, sprintf('\nGrid Cell Edge Length =')), 1);
+verifyEqual(testCase, count(text, 'Total Spatial Cells'), 1);
+verifyEqual(testCase, count(text, 'Filling Progress: 25%'), 1);
+verifyEqual(testCase, count(text, 'Filling Progress: 50%'), 1);
+verifyEqual(testCase, count(text, 'Filling Progress: 75%'), 1);
+verifyEqual(testCase, count(text, 'Filling Progress: 100%'), 1);
+
+clear cleanup
+end
+
 function testCoordinateFrameKeepsSphereAndGridCsvCoordinatesAligned(testCase)
 % Catches exporting centred spheres alongside world-coordinate grid points.
 worldDirectory = tempname;
