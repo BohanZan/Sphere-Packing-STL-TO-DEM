@@ -71,6 +71,7 @@ end
 a = vertices(faces(:,1),:);
 b = vertices(faces(:,2),:);
 c = vertices(faces(:,3),:);
+triangles = struct('a', double(a), 'b', double(b), 'c', double(c));
 ab = b(:,1:2) - a(:,1:2);
 ac = c(:,1:2) - a(:,1:2);
 determinant = ab(:,1).*ac(:,2) - ab(:,2).*ac(:,1);
@@ -100,7 +101,8 @@ end
 context=struct('vertices',vertices,'faces',faces,'lower',lower,'upper',upper,...
     'cellSize',cellSize,'cellCount',count,'triangleCells',{triCells},...
     'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells},'tolerance',tolerance, ...
-    'faceCentres',faceCentres,'inwardNormals',inwardNormals,'ray',ray);
+    'faceCentres',faceCentres,'inwardNormals',inwardNormals,'ray',ray, ...
+    'triangles',triangles);
 if occupancyOptions.enabled
     context.occupancy = spBuildOccupancyGrid(context, maxRadius, occupancyOptions);
 else

@@ -247,6 +247,58 @@ for scale = [1, 1e-6]
 end
 end
 
+function testTriangleCacheAndBatchedHitsMatchScalarReference(testCase)
+% Catches cache or batched closest-feature changes to strict collision logic.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
+ids = 1:size(context.faces, 1);
+for fieldName = {'a', 'b', 'c'}
+    value = context.triangles.(fieldName{1});
+    verifyClass(testCase, value, 'double');
+    verifySize(testCase, value, [size(context.faces,1), 3]);
+end
+verifyEqual(testCase, context.triangles.a, double(context.vertices(context.faces(:,1),:)));
+verifyEqual(testCase, context.triangles.b, double(context.vertices(context.faces(:,2),:)));
+verifyEqual(testCase, context.triangles.c, double(context.vertices(context.faces(:,3),:)));
+shapeProbe = [10 10 0.1];
+expected = spSphereHitsTriangles(context, shapeProbe, 0.2, [1 2]);
+verifyEqual(testCase, spSphereHitsTriangles(context, shapeProbe, 0.2, [1; 2]), expected);
+verifyEqual(testCase, spSphereHitsTriangles(context, shapeProbe, 0.2, [1 1 2]), expected);
+verifyFalse(testCase, spSphereHitsTriangles(context, shapeProbe, 0.2, []));
+
+for centre = [1 10 10; 19 10 10; 10 1 10; 10 19 10; 10 10 1; 10 10 19].'
+    for radius = [0.99 1.00 1.01]
+        verifyEqual(testCase, spSphereHitsTriangles(context, centre.', radius, ids), ...
+            spReferenceSphereHitsTriangles(context, centre.', radius, ids));
+    end
+end
+rng(73, 'twister');
+for id = 1:100
+    centre = 20*rand(1,3); radius = 0.05 + 2.0*rand;
+    verifyEqual(testCase, spSphereHitsTriangles(context, centre, radius, ids), ...
+        spReferenceSphereHitsTriangles(context, centre, radius, ids));
+end
+end
+
+function testBatchedTriangleHitsCoverEveryClosestFeature(testCase)
+% Catches changed branch order across vertex, edge, and face regions.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
+points = [-1 -1 0; 19 21 0; 21 -1 0; 5 5 1; 5 0 1; 20 5 1; 15 5 1];
+distances = [sqrt(2), sqrt(2), sqrt(2), 1, 1, 1, 1];
+for id = 1:size(points, 1)
+    for delta = [-0.1 0.1]
+        radius = distances(id) + context.tolerance + delta;
+        verifyEqual(testCase, spSphereHitsTriangles(context, points(id,:), radius, 1), ...
+            spReferenceSphereHitsTriangles(context, points(id,:), radius, 1));
+    end
+end
+verifyFalse(testCase, spSphereHitsTriangles(context, [10 10 10], context.tolerance, 1));
+verifyFalse(testCase, spSphereHitsTriangles(context, [10 10 10], context.tolerance/2, 1));
+end
+
 function testOccupancyHandlesConvexConcaveAndCavityMeshes(testCase)
 % Catches nonconservative classification of solid, concave, and cavity cells.
 root = fileparts(fileparts(mfilename('fullpath')));
