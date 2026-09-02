@@ -1,6 +1,12 @@
-function context = spBuildContext(model, maxRadius, buffer, tolerance)
+function context = spBuildContext(model, maxRadius, buffer, tolerance, occupancyOptions)
 %SPBUILDCONTEXT Preprocess STL triangles into 2-D and 3-D uniform grids.
 %The resulting sparse hashes accelerate sphere, triangle and ray queries.
+
+% Keep direct callers on the existing sparse-only construction path.
+if nargin < 5 || isempty(occupancyOptions)
+    occupancyOptions = struct('enabled', false, 'cellSize', [], 'maxCells', 2e6);
+end
+occupancyOptions = spNormaliseOccupancyOptions(occupancyOptions);
 
 %Read and bound the closed surface before selecting numerical scales.
 [vertices, faces] = readMesh(model);
@@ -61,10 +67,48 @@ for id=1:size(faces,1)
     end
 end
 
+%Precompute the face-indexed coefficients used by exact vertical ray tests.
+a = vertices(faces(:,1),:);
+b = vertices(faces(:,2),:);
+c = vertices(faces(:,3),:);
+triangles = struct('a', double(a), 'b', double(b), 'c', double(c));
+ab = b(:,1:2) - a(:,1:2);
+ac = c(:,1:2) - a(:,1:2);
+determinant = ab(:,1).*ac(:,2) - ab(:,2).*ac(:,1);
+ray = struct('a', a, 'ab', ab, 'ac', ac, 'determinant', determinant, ...
+    'inverseDeterminant', 1./determinant, ...
+    'zDelta', [b(:,3)-a(:,3), c(:,3)-a(:,3)]);
+
+%Cache the face geometry and orient each normal by the existing ray probe.
+faceVertices = reshape(vertices(faces.', :), 3, size(faces,1), 3);
+faceCentres = reshape(mean(faceVertices, 1), size(faces,1), 3);
+rawNormals = cross(vertices(faces(:,2),:) - vertices(faces(:,1),:), ...
+    vertices(faces(:,3),:) - vertices(faces(:,1),:), 2);
+rawNormals = rawNormals ./ vecnorm(rawNormals, 2, 2);
+probeContext = struct('vertices',vertices,'faces',faces,'lower',lower, ...
+    'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells}, ...
+    'tolerance',tolerance,'ray',ray);
+inwardNormals = rawNormals;
+probeDistance = max(tolerance*100, 1e-8*cellSize);
+for id = 1:size(faces,1)
+    probe = faceCentres(id,:) + probeDistance*rawNormals(id,:);
+    if ~spPointInside(probeContext, probe)
+        inwardNormals(id,:) = -rawNormals(id,:);
+    end
+end
+
 %Collect all preprocessed geometry and spatial indexing information.
 context=struct('vertices',vertices,'faces',faces,'lower',lower,'upper',upper,...
     'cellSize',cellSize,'cellCount',count,'triangleCells',{triCells},...
-    'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells},'tolerance',tolerance);
+    'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells},'tolerance',tolerance, ...
+    'faceCentres',faceCentres,'inwardNormals',inwardNormals,'ray',ray, ...
+    'triangles',triangles);
+if occupancyOptions.enabled
+    context.occupancy = spBuildOccupancyGrid(context, maxRadius, occupancyOptions);
+else
+    context.occupancy = struct('enabled', false, 'lower', lower, 'cellSize', NaN, ...
+        'cellCount', zeros(1,3), 'labels', zeros(0,0,0, 'uint8'));
+end
 fprintf('Spatial Grid Discretisation\n');
 fprintf('Grid Cell Edge Length = %.8g\n', cellSize);
 fprintf('Grid Counts Nx=%d; Ny=%d; Nz=%d\n', count(1), count(2), count(3));
@@ -91,6 +135,30 @@ fprintf('========================================\n');
     function key = xyKey(index)
         key = sprintf('%d,%d', index(1), index(2));
     end
+end
+
+function options = spNormaliseOccupancyOptions(options)
+%SPNORMALISEOCCUPANCYOPTIONS Validate direct occupancy-grid construction options.
+required = {'enabled', 'cellSize', 'maxCells'};
+for id = 1:numel(required)
+    if ~isfield(options, required{id})
+        error('SpherePacking:InvalidOccupancyOptions', ...
+            'occupancyOptions.%s is required.', required{id});
+    end
+end
+if ~(isscalar(options.enabled) && (islogical(options.enabled) || ...
+        (isnumeric(options.enabled) && isfinite(options.enabled) && ...
+        any(options.enabled == [0 1]))))
+    error('SpherePacking:InvalidOccupancyAcceleration', ...
+        'occupancy acceleration must be a scalar logical value.');
+end
+options.enabled = logical(options.enabled);
+if ~isempty(options.cellSize)
+    validateattributes(options.cellSize, {'numeric'}, ...
+        {'real','finite','scalar','positive'});
+end
+validateattributes(options.maxCells, {'numeric'}, ...
+    {'real','finite','scalar','integer','positive','<=',double(intmax('uint32'))});
 end
 
 function [vertices, faces] = readMesh(model)

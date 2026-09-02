@@ -1,0 +1,18 @@
+SpherePacking Task 1 performance baseline
+
+Measured before any production-logic optimization on 2026-09-02.
+
+Case:
+- Model: inputs/ironParticle/ironParticle.stl
+- Radii: 100 entries, each 3.0e-6
+- maxAttempts: 100; buffer: 0
+- randomSeed: 53; maxCompressionSweeps: 100
+- shakeSweeps: 2; maxRefillPasses: 3; coordinateFrame: world
+
+Results (seconds): 126.735856, 128.264100, 146.996799
+Median runtime (seconds): 128.264100
+Accepted spheres per run: 20, 20, 20
+Sphere-volume fraction per run: -0.237247632907, -0.237247632907, -0.237247632907
+
+The fraction is retained exactly as returned by the current code.  It is
+negative because the STL volume is signed for this mesh orientation.

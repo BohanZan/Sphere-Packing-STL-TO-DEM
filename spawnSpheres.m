@@ -14,8 +14,10 @@ radii = radii(:);
 options = spDefaultOptions(options, maxAttempts, buffer, model);
 
 %Read the STL geometry and initialise the sparse spatial-hash state.
-context = spBuildContext(model, max(radii), options.buffer, options.tolerance);
-state = spEmptyState(context);
+occupancyOptions = struct('enabled', options.occupancyAcceleration, ...
+    'cellSize', options.occupancyCellSize, 'maxCells', options.occupancyMaxCells);
+context = spBuildContext(model, max(radii), options.buffer, options.tolerance, occupancyOptions);
+state = spEmptyState(context, numel(radii));
 
 %Populate the interior from random trial centres, followed by relaxation.
 nextRadius = 1;
@@ -37,8 +39,10 @@ if nextRadius <= numel(radii)
 end
 
 %Calculate volume, mass and centre of mass in the original world frame.
-worldCentres = state.centres;
-unitVolumes = (4/3) * pi * state.radii.^3;
+validIds = 1:state.count;
+worldCentres = state.centres(validIds,:);
+acceptedRadii = state.radii(validIds);
+unitVolumes = (4/3) * pi * acceptedRadii.^3;
 masses = (options.density * unitVolumes).';
 totalVolume = sum(unitVolumes);
 centreOfMass = zeros(3, 1);
@@ -57,8 +61,8 @@ else
 end
 
 %Assemble the DEM array and calculate inertia about the physical centre of mass.
-assembly = [outputCentres.'; state.radii.'];
-inertia = spInertia(centredCentres, state.radii, masses.');
+assembly = [outputCentres.'; acceptedRadii.'];
+inertia = spInertia(centredCentres, acceptedRadii, masses.');
 stlVolume = spSignedMeshVolume(context.vertices, context.faces);
 report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ...
     'unplacedCount', numel(radii) - state.count, 'stopReason', 'completed', ...
@@ -92,7 +96,8 @@ defaults = struct('buffer', buffer, 'maxAttempts', maxAttempts, ...
     'gravity', [0 0 -1], 'tolerance', 1e-9, 'compressionTolerance', 1e-5, ...
     'maxCompressionSweeps', 100, 'shakeSweeps', 2, 'maxInitialFailures', 2, ...
     'maxRefillPasses', 3, 'randomSeed', [], 'outputDirectory', '', 'outputPrefix', '', ...
-    'density', 1.0, 'coordinateFrame', 'center_of_mass');
+    'density', 1.0, 'coordinateFrame', 'center_of_mass', ...
+    'occupancyAcceleration', true, 'occupancyCellSize', [], 'occupancyMaxCells', 2e6);
 names = fieldnames(defaults);
 for k = 1:numel(names)
     if ~isfield(options, names{k}) || isempty(options.(names{k}))
@@ -107,6 +112,20 @@ if ~ismember(options.coordinateFrame, {'world', 'center_of_mass'})
     error('SpherePacking:InvalidCoordinateFrame', ...
         'options.coordinateFrame must be ''world'' or ''center_of_mass''.');
 end
+if ~(isscalar(options.occupancyAcceleration) && ...
+        (islogical(options.occupancyAcceleration) || ...
+        (isnumeric(options.occupancyAcceleration) && isfinite(options.occupancyAcceleration) && ...
+        any(options.occupancyAcceleration == [0 1]))))
+    error('SpherePacking:InvalidOccupancyAcceleration', ...
+        'options.occupancyAcceleration must be a scalar logical value.');
+end
+options.occupancyAcceleration = logical(options.occupancyAcceleration);
+if ~isempty(options.occupancyCellSize)
+    validateattributes(options.occupancyCellSize, {'numeric'}, ...
+        {'real','finite','scalar','positive'});
+end
+validateattributes(options.occupancyMaxCells, {'numeric'}, ...
+    {'real','finite','scalar','integer','positive','<=',double(intmax('uint32'))});
 
 %Apply an optional random seed and infer output names from an STL filename.
 if ~isempty(options.randomSeed), rng(options.randomSeed, 'twister'); end

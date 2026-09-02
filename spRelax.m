@@ -12,7 +12,8 @@ for sweep=1:options.maxCompressionSweeps
  end
  %Settle every sphere along gravity, then check the compression criterion.
  state=moveSweep(context,state,gravity);
- energy=sum((state.centres*gravity.').*state.radii.^3);
+ validIds=1:state.count;
+ energy=sum((state.centres(validIds,:)*gravity.').*state.radii(validIds).^3);
  if isfinite(previous) && abs(energy/previous-1)<options.compressionTolerance, return; end
  previous=energy;
 end
@@ -24,7 +25,7 @@ for id=1:state.count
  distance=firstContactDistance(context,state,id,direction);
  if distance>0
   state.centres(id,:)=state.centres(id,:)+distance*direction;
-  state=spReindex(context,state);
+  state=spReindex(context,state,id);
  end
 end
 end

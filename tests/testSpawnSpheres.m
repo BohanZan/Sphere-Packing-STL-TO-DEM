@@ -4,6 +4,62 @@ function tests = testSpawnSpheres
 tests = functiontests(localfunctions);
 end
 
+function testFixedSeedPackingMatchesReferenceFixture(testCase)
+%FIXEDSEEDPACKINGMATCHESREFERENCEFIXTURE Guard future optimisations exactly.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+fixture = fullfile(root, 'tests', 'fixtures', 'seed53_cube_reference.mat');
+if ~isfile(fixture)
+    verifyTrue(testCase, false, ...
+        'The pre-optimisation fixed-seed fixture must exist before this test runs.');
+    return;
+end
+
+loaded = load(fixture, 'expected');
+out = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(out));
+options = struct('randomSeed', 53, 'outputDirectory', out, ...
+    'outputPrefix', 'reference', 'coordinateFrame', 'world', ...
+    'maxCompressionSweeps', 8, 'shakeSweeps', 1, 'maxRefillPasses', 1);
+[assembly, masses, totalVolume, inertia, report] = ...
+    spawnSpheres(spTestCubeMesh(20), [0.5; 0.75; 1.0; 1.25], 300, 0.01, options);
+
+verifyEqual(testCase, assembly, loaded.expected.assembly, 'AbsTol', 1e-12);
+verifyEqual(testCase, masses, loaded.expected.masses, 'AbsTol', 1e-12);
+verifyEqual(testCase, totalVolume, loaded.expected.totalVolume, 'AbsTol', 1e-12);
+verifyEqual(testCase, inertia, loaded.expected.inertia, 'AbsTol', 1e-12);
+verifyEqual(testCase, report.acceptedCount, loaded.expected.acceptedCount);
+verifyEqual(testCase, report.unplacedCount, loaded.expected.unplacedCount);
+verifyEqual(testCase, report.centreOfMass, loaded.expected.centreOfMass, 'AbsTol', 1e-12);
+verifyEqual(testCase, report.coordinateFrame, loaded.expected.coordinateFrame);
+clear cleanup
+end
+
+function testBenchmarkReturnsOneDeterministicSmokeSample(testCase)
+%BENCHMARKRETURNSONEDETERMINISTICSMOKESAMPLE Exercise the benchmark harness.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+if isempty(which('benchmarkSpherePacking'))
+    verifyNotEmpty(testCase, which('benchmarkSpherePacking'), ...
+        'Task 1 must provide the benchmarkSpherePacking smoke-test harness.');
+    return;
+end
+
+config = struct('model', spTestCubeMesh(20), 'radii', [0.5; 0.75], ...
+    'maxAttempts', 300, 'buffer', 0.01, ...
+    'options', struct('randomSeed', 59, 'maxCompressionSweeps', 3, ...
+    'shakeSweeps', 0, 'maxRefillPasses', 0, 'coordinateFrame', 'world'));
+result = benchmarkSpherePacking(1, config);
+expectedVolume = (4/3) * pi * sum(config.radii.^3);
+
+verifySize(testCase, result.seconds, [1 1]);
+verifyTrue(testCase, isfinite(result.seconds));
+verifyEqual(testCase, result.acceptedCount, 2);
+verifyEqual(testCase, result.sphereVolumeFraction, expectedVolume / 20^3, ...
+    'AbsTol', 1e-12);
+verifyEqual(testCase, result.medianSeconds, result.seconds, 'AbsTol', 1e-12);
+end
+
 function testRequestedRadiiArePreservedAndDoNotOverlap(testCase)
 % Catches accepting a sphere with a changed radius or an intersecting pair.
 rng(31, 'twister');
@@ -167,6 +223,330 @@ verifyTrue(testCase, spPointInside(context, [0.1 0.1 0.1]*1e-6));
 verifyFalse(testCase, spPointInside(context, [0.8 0.8 0.8]*1e-6));
 end
 
+function testExactPointInsideMatchesScalarReferenceAcrossScales(testCase)
+% Catches parity changes while replacing scalar vertical-ray intersections.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+for scale = [1, 1e-6]
+    context = spBuildContext(spTestCubeMesh(20*scale), 1.0*scale, 0.01*scale, 1e-9);
+    axes = cell(1, 3);
+    for dimension = 1:3
+        axes{dimension} = context.lower(dimension) + ...
+            ((0:context.cellCount(dimension)-1) + 0.5) * context.cellSize;
+    end
+    [x, y, z] = ndgrid(axes{1}, axes{2}, axes{3});
+    cellCentres = [x(:), y(:), z(:)];
+    rng(71, 'twister');
+    points = scale * [10 10 10; 0 0 0; 20 20 20; 20.1 10 10; 20*rand(100,3)];
+    points = [cellCentres; points];
+    for id = 1:size(points, 1)
+        expected = spReferencePointInside(context, points(id,:));
+        verifyEqual(testCase, spExactPointInside(context, points(id,:)), expected);
+        verifyEqual(testCase, spPointInside(context, points(id,:)), expected);
+    end
+end
+end
+
+function testTriangleCacheAndBatchedHitsMatchScalarReference(testCase)
+% Catches cache or batched closest-feature changes to strict collision logic.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
+ids = 1:size(context.faces, 1);
+for fieldName = {'a', 'b', 'c'}
+    value = context.triangles.(fieldName{1});
+    verifyClass(testCase, value, 'double');
+    verifySize(testCase, value, [size(context.faces,1), 3]);
+end
+verifyEqual(testCase, context.triangles.a, double(context.vertices(context.faces(:,1),:)));
+verifyEqual(testCase, context.triangles.b, double(context.vertices(context.faces(:,2),:)));
+verifyEqual(testCase, context.triangles.c, double(context.vertices(context.faces(:,3),:)));
+shapeProbe = [10 10 0.1];
+expected = spSphereHitsTriangles(context, shapeProbe, 0.2, [1 2]);
+verifyEqual(testCase, spSphereHitsTriangles(context, shapeProbe, 0.2, [1; 2]), expected);
+verifyEqual(testCase, spSphereHitsTriangles(context, shapeProbe, 0.2, [1 1 2]), expected);
+verifyFalse(testCase, spSphereHitsTriangles(context, shapeProbe, 0.2, []));
+
+for centre = [1 10 10; 19 10 10; 10 1 10; 10 19 10; 10 10 1; 10 10 19].'
+    for radius = [0.99 1.00 1.01]
+        verifyEqual(testCase, spSphereHitsTriangles(context, centre.', radius, ids), ...
+            spReferenceSphereHitsTriangles(context, centre.', radius, ids));
+    end
+end
+rng(73, 'twister');
+for id = 1:100
+    centre = 20*rand(1,3); radius = 0.05 + 2.0*rand;
+    verifyEqual(testCase, spSphereHitsTriangles(context, centre, radius, ids), ...
+        spReferenceSphereHitsTriangles(context, centre, radius, ids));
+end
+end
+
+function testBatchedTriangleHitsCoverEveryClosestFeature(testCase)
+% Catches changed branch order across vertex, edge, and face regions.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
+points = [-1 -1 0; 19 21 0; 21 -1 0; 5 5 1; 5 0 1; 20 5 1; 15 5 1];
+distances = [sqrt(2), sqrt(2), sqrt(2), 1, 1, 1, 1];
+for id = 1:size(points, 1)
+    for delta = [-0.1 0.1]
+        radius = distances(id) + context.tolerance + delta;
+        verifyEqual(testCase, spSphereHitsTriangles(context, points(id,:), radius, 1), ...
+            spReferenceSphereHitsTriangles(context, points(id,:), radius, 1));
+    end
+end
+verifyFalse(testCase, spSphereHitsTriangles(context, [10 10 10], context.tolerance, 1));
+verifyFalse(testCase, spSphereHitsTriangles(context, [10 10 10], context.tolerance/2, 1));
+end
+
+function testSphereNeighboursMatchGenericQuery(testCase)
+% Catches a specialised sphere collector that misses or repeats nearby IDs.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
+context.cellSize = 5;
+context.cellCount = [4 4 4];
+state = spEmptyState(context, 27);
+for ix = 1:3
+    for iy = 1:3
+        for iz = 1:3
+            centre = context.lower + ([ix iy iz] - 0.5) * context.cellSize;
+            state = spAddSphere(context, state, centre, 0.1);
+        end
+    end
+end
+index = [2 2 2];
+actual = sort(spSphereNeighbours(context, state.sphereCells, index));
+expected = sort(spHashNeighbours(context, state.sphereCells, index));
+verifyEqual(testCase, actual, expected);
+verifyEqual(testCase, actual, 1:27);
+
+triangleHash = containers.Map('KeyType', 'char', 'ValueType', 'any');
+spHashInsert(triangleHash, [1 1 1], 7);
+spHashInsert(triangleHash, [2 2 2], 7);
+verifyEqual(testCase, spHashNeighbours(context, triangleHash, index), 7);
+end
+
+function testCanPlaceKeepsSphereOverlapAndIgnoreIdSemantics(testCase)
+% Catches replacing per-sphere overlap checks with a changed ignore rule.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
+state = spAddSphere(context, spEmptyState(context, 1), [10 10 10], 1);
+verifyFalse(testCase, spCanPlace(context, state, [10.5 10 10], 1));
+verifyTrue(testCase, spCanPlace(context, state, [10.5 10 10], 1, 1));
+end
+
+function testPreallocatedStateDoesNotExposeUnacceptedRows(testCase)
+% Catches capacity-tail rows leaking into an assembly or its sphere CSV.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(2.10), 1, 0.01, 1e-9);
+state = spEmptyState(context, 4);
+verifySize(testCase, state.centres, [4 3]);
+verifySize(testCase, state.radii, [4 1]);
+verifySize(testCase, state.cellIndices, [4 3]);
+verifyEqual(testCase, state.count, 0);
+
+outputDirectory = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(outputDirectory));
+options = struct('randomSeed', 43, 'outputDirectory', outputDirectory, ...
+    'outputPrefix', 'partial', 'coordinateFrame', 'world', ...
+    'maxCompressionSweeps', 0, 'shakeSweeps', 0, 'maxRefillPasses', 0);
+[assembly, masses, ~, ~, report] = ...
+    spawnSpheres(spTestCubeMesh(2.10), [1; 1; 1; 1], 100, 0.01, options);
+sphereTable = readtable(report.outputFiles{1});
+verifyLessThan(testCase, report.acceptedCount, 4);
+verifySize(testCase, assembly, [4 report.acceptedCount]);
+verifyEqual(testCase, numel(masses), report.acceptedCount);
+verifyEqual(testCase, height(sphereTable), report.acceptedCount);
+clear cleanup
+end
+
+function testIncrementalReindexMatchesFullRebuild(testCase)
+% Catches moved IDs that leave stale, duplicate, or missing hash entries.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
+context.cellSize = 5;
+context.cellCount = [4 4 4];
+state = spEmptyState(context, 3);
+state = spAddSphere(context, state, [2.5 2.5 2.5], 0.1);
+state = spAddSphere(context, state, [7.5 2.5 2.5], 0.1);
+state = spAddSphere(context, state, [12.5 2.5 2.5], 0.1);
+
+state.centres(1,:) = [17.5 2.5 2.5];
+incremental = spReindex(context, state, 1);
+rebuilt = spReindex(context, incremental);
+verifySphereHashesEqual(testCase, incremental.sphereCells, rebuilt.sphereCells);
+verifyEqual(testCase, incremental.cellIndices(1:incremental.count,:), ...
+    rebuilt.cellIndices(1:rebuilt.count,:));
+
+sameCell = incremental;
+sameCell.centres(2,:) = [7.7 2.5 2.5];
+sameCell = spReindex(context, sameCell, 2);
+rebuiltSameCell = spReindex(context, sameCell);
+verifySphereHashesEqual(testCase, sameCell.sphereCells, rebuiltSameCell.sphereCells);
+end
+
+function testRelaxedStateIncrementalHashMatchesFullRebuild(testCase)
+% Catches a relaxation sweep leaving map membership behind a moved centre.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
+state = spEmptyState(context, 2);
+state = spAddSphere(context, state, [6 6 10], 1);
+state = spAddSphere(context, state, [14 14 10], 1);
+options = struct('maxCompressionSweeps', 1, 'shakeSweeps', 0, ...
+    'compressionTolerance', 1e-5);
+relaxed = spRelax(context, state, [0 0 -1], options, true);
+rebuilt = spReindex(context, relaxed);
+verifySphereHashesEqual(testCase, relaxed.sphereCells, rebuilt.sphereCells);
+verifyEqual(testCase, relaxed.cellIndices(1:relaxed.count,:), ...
+    rebuilt.cellIndices(1:rebuilt.count,:));
+end
+
+function testOccupancyHandlesConvexConcaveAndCavityMeshes(testCase)
+% Catches nonconservative classification of solid, concave, and cavity cells.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+cfg = struct('enabled', true, 'cellSize', 0.5, 'maxCells', 2e6);
+convex = spBuildContext(spTestCubeMesh(20), 1.0, 0, 1e-9, cfg);
+concave = spBuildContext(spTestConcavePrism(), 0.25, 0, 1e-9, cfg);
+hollow = spBuildContext(spTestHollowCubeMesh(), 0.5, 0, 1e-9, cfg);
+cases = {convex, [10 10 10], true; convex, [21 10 10], false; ...
+         concave, [0.5 2.0 1.5], true; concave, [2.0 2.0 1.5], false; ...
+         hollow, [2 10 10], true; hollow, [10 10 10], false; hollow, [21 10 10], false};
+for id = 1:size(cases, 1)
+    context = cases{id,1}; point = cases{id,2}; expected = cases{id,3};
+    verifyEqual(testCase, spExactPointInside(context, point), expected);
+    verifyEqual(testCase, spPointInside(context, point), expected);
+end
+end
+
+function testDisabledOccupancyAndClampedCellIndices(testCase)
+% Catches changing the existing four-argument context construction path.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+disabled = spBuildContext(spTestCubeMesh(4), 0.5, 0, 1e-9);
+verifyFalse(testCase, disabled.occupancy.enabled);
+verifyEmpty(testCase, disabled.occupancy.labels);
+point = [2 2 2];
+verifyEqual(testCase, spPointInside(disabled, point), ...
+    spExactPointInside(disabled, point));
+
+cfg = struct('enabled', true, 'cellSize', 0.5, 'maxCells', 2e6);
+enabled = spBuildContext(spTestCubeMesh(4), 0.5, 0, 1e-9, cfg);
+occupancy = enabled.occupancy;
+verifyEqual(testCase, spOccupancyCellIndex(occupancy, [-10 -10 -10]), [1 1 1]);
+verifyEqual(testCase, spOccupancyCellIndex(occupancy, [10 10 10]), occupancy.cellCount);
+verifyEqual(testCase, spOccupancyCellIndex(occupancy, occupancy.lower), [1 1 1]);
+verifyEqual(testCase, spOccupancyCellIndex(occupancy, enabled.upper), occupancy.cellCount);
+end
+
+function testOccupancyGridCapsDenseStorageAndCompletesLabels(testCase)
+% Catches allocating the requested fine grid before applying the hard cap.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+cfg = struct('enabled', true, 'cellSize', 1e-4, 'maxCells', 64);
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0, 1e-9, cfg);
+
+verifyLessThanOrEqual(testCase, prod(double(context.occupancy.cellCount)), cfg.maxCells);
+verifyClass(testCase, context.occupancy.labels, 'uint8');
+verifyFalse(testCase, any(context.occupancy.labels(:) == 3));
+end
+
+function testEveryNonMarginOccupancyCellMatchesExactParity(testCase)
+% Catches a 0/1 shortcut that is not valid throughout its entire cell.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+cfg = struct('enabled', true, 'cellSize', 0.5, 'maxCells', 2e6);
+contexts = {spBuildContext(spTestCubeMesh(4), 0.5, 0, 1e-9, cfg), ...
+    spBuildContext(spTestConcavePrism(), 0.25, 0, 1e-9, cfg), ...
+    spBuildContext(spTestHollowCubeMesh(), 0.5, 0, 1e-9, ...
+        struct('enabled', true, 'cellSize', 2.5, 'maxCells', 2e6))};
+offsets = [-0.49 0 0.49];
+for contextId = 1:numel(contexts)
+    context = contexts{contextId};
+    occupancy = context.occupancy;
+    nonMargin = find(occupancy.labels ~= 2);
+    for linearIndex = nonMargin.'
+        [ix, iy, iz] = ind2sub(occupancy.cellCount, linearIndex);
+        centre = occupancy.lower + ([ix iy iz] - 0.5) * occupancy.cellSize;
+        expected = occupancy.labels(linearIndex) == 1;
+        verifyEqual(testCase, spExactPointInside(context, centre), expected);
+        for dimension = 1:3
+            for offset = offsets
+                point = centre;
+                point(dimension) = point(dimension) + offset * occupancy.cellSize;
+                verifyEqual(testCase, spExactPointInside(context, point), expected);
+                verifyEqual(testCase, spPointInside(context, point), expected);
+            end
+        end
+    end
+end
+end
+
+function testSeededPackingMatchesWithOccupancyDisabledAndEnabled(testCase)
+% Catches occupancy shortcuts changing the accepted seeded sphere assembly.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+disabledOutput = tempname;
+enabledOutput = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(disabledOutput));
+cleanup2 = onCleanup(@() removeOutputDirectory(enabledOutput));
+baseOptions = struct('randomSeed', 53, 'coordinateFrame', 'world', ...
+    'maxCompressionSweeps', 8, 'shakeSweeps', 1, 'maxRefillPasses', 1, ...
+    'occupancyCellSize', 0.5, 'occupancyMaxCells', 2e6);
+disabledOptions = baseOptions;
+disabledOptions.occupancyAcceleration = false;
+disabledOptions.outputDirectory = disabledOutput;
+disabledOptions.outputPrefix = 'disabled';
+enabledOptions = baseOptions;
+enabledOptions.occupancyAcceleration = true;
+enabledOptions.outputDirectory = enabledOutput;
+enabledOptions.outputPrefix = 'enabled';
+
+[disabledAssembly, disabledMasses, disabledVolume, disabledInertia, disabledReport] = ...
+    spawnSpheres(spTestCubeMesh(20), [0.5; 0.75; 1.0; 1.25], 300, 0.01, disabledOptions);
+[enabledAssembly, enabledMasses, enabledVolume, enabledInertia, enabledReport] = ...
+    spawnSpheres(spTestCubeMesh(20), [0.5; 0.75; 1.0; 1.25], 300, 0.01, enabledOptions);
+
+verifyEqual(testCase, enabledAssembly, disabledAssembly, 'AbsTol', 1e-12);
+verifyEqual(testCase, enabledMasses, disabledMasses, 'AbsTol', 1e-12);
+verifyEqual(testCase, enabledVolume, disabledVolume, 'AbsTol', 1e-12);
+verifyEqual(testCase, enabledInertia, disabledInertia, 'AbsTol', 1e-12);
+verifyEqual(testCase, enabledReport.acceptedCount, disabledReport.acceptedCount);
+verifyEqual(testCase, enabledReport.sphereAssemblyVolume / enabledReport.stlVolume, ...
+    disabledReport.sphereAssemblyVolume / disabledReport.stlVolume, 'AbsTol', 1e-12);
+clear cleanup cleanup2
+end
+
+function testCachedInwardNormalsPointIntoTheClosedMesh(testCase)
+% Catches cached face normals that no longer use the existing ray-probe rule.
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
+probeDistance = max(context.tolerance*100, 1e-8*context.cellSize);
+for id = 1:size(context.faces, 1)
+    probe = context.faceCentres(id,:) + probeDistance*context.inwardNormals(id,:);
+    verifyTrue(testCase, spPointInside(context, probe));
+end
+end
+
+function testDisabledRefillLeavesStateAndNextRadiusUnchanged(testCase)
+% Catches a disabled refill pass that mutates packing state.
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
+state = spAddSphere(context, spEmptyState(context, 1), [10 10 10], 1.0);
+before = state;
+options = struct('maxRefillPasses', 0, 'gravity', [0 0 -1]);
+
+[state, nextRadius] = spRefill(context, state, 1.0, 1, options);
+
+verifyEqual(testCase, state.centres, before.centres);
+verifyEqual(testCase, state.radii, before.radii);
+verifyEqual(testCase, state.count, before.count);
+verifyEqual(testCase, nextRadius, 1);
+end
+
 function mesh = cubeMesh(sideLength)
 %CUBEMESH Construct a consistently oriented closed cube for deterministic tests.
 %Use two triangular faces per side to match the STL mesh representation.
@@ -181,5 +561,15 @@ function removeOutputDirectory(pathName)
 %REMOVEOUTPUTDIRECTORY Delete one test-only temporary output directory.
 if isfolder(pathName)
     rmdir(pathName, 's');
+end
+end
+
+function verifySphereHashesEqual(testCase, actual, expected)
+%VERIFYSPHEREHASHESEQUAL Compare sparse maps without relying on key order.
+actualKeys = sort(keys(actual));
+expectedKeys = sort(keys(expected));
+verifyEqual(testCase, actualKeys, expectedKeys);
+for id = 1:numel(actualKeys)
+    verifyEqual(testCase, sort(actual(actualKeys{id})), sort(expected(actualKeys{id})));
 end
 end
