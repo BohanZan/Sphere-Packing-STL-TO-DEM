@@ -1,6 +1,6 @@
-function ids = spHashNeighbours(context, hash, index)
-%SPHASHNEIGHBOURS Return unique IDs from INDEX and its 26 neighbours.
-%Search the local 3-by-3-by-3 block, clipped at domain boundaries.
+function ids = spSphereNeighbours(context, hash, index)
+%SPSPHERENEIGHBOURS Return sphere IDs from INDEX and its 26 neighbours.
+%Each sphere is indexed in one spatial cell, so this query needs no unique.
 parts = cell(27, 1);
 partCount = 0;
 for ix = max(1, index(1)-1):min(context.cellCount(1), index(1)+1)
@@ -14,11 +14,9 @@ for ix = max(1, index(1)-1):min(context.cellCount(1), index(1)+1)
         end
     end
 end
-
-%Triangles can cover adjacent cells, so keep the generic query deduplicated.
 if partCount == 0
     ids = [];
 else
-    ids = unique([parts{1:partCount}]);
+    ids = [parts{1:partCount}];
 end
 end

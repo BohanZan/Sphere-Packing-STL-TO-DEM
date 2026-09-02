@@ -299,6 +299,44 @@ verifyFalse(testCase, spSphereHitsTriangles(context, [10 10 10], context.toleran
 verifyFalse(testCase, spSphereHitsTriangles(context, [10 10 10], context.tolerance/2, 1));
 end
 
+function testSphereNeighboursMatchGenericQuery(testCase)
+% Catches a specialised sphere collector that misses or repeats nearby IDs.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
+context.cellSize = 5;
+context.cellCount = [4 4 4];
+state = spEmptyState(context);
+for ix = 1:3
+    for iy = 1:3
+        for iz = 1:3
+            centre = context.lower + ([ix iy iz] - 0.5) * context.cellSize;
+            state = spAddSphere(context, state, centre, 0.1);
+        end
+    end
+end
+index = [2 2 2];
+actual = sort(spSphereNeighbours(context, state.sphereCells, index));
+expected = sort(spHashNeighbours(context, state.sphereCells, index));
+verifyEqual(testCase, actual, expected);
+verifyEqual(testCase, actual, 1:27);
+
+triangleHash = containers.Map('KeyType', 'char', 'ValueType', 'any');
+spHashInsert(triangleHash, [1 1 1], 7);
+spHashInsert(triangleHash, [2 2 2], 7);
+verifyEqual(testCase, spHashNeighbours(context, triangleHash, index), 7);
+end
+
+function testCanPlaceKeepsSphereOverlapAndIgnoreIdSemantics(testCase)
+% Catches replacing per-sphere overlap checks with a changed ignore rule.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
+state = spAddSphere(context, spEmptyState(context), [10 10 10], 1);
+verifyFalse(testCase, spCanPlace(context, state, [10.5 10 10], 1));
+verifyTrue(testCase, spCanPlace(context, state, [10.5 10 10], 1, 1));
+end
+
 function testOccupancyHandlesConvexConcaveAndCavityMeshes(testCase)
 % Catches nonconservative classification of solid, concave, and cavity cells.
 root = fileparts(fileparts(mfilename('fullpath')));

@@ -11,10 +11,14 @@ if ~spPointInside(context,centre), return; end
 
 %Check only neighbouring sparse cells for overlapping accepted spheres.
 idx=spCellIndex(context,centre);
-ids=spHashNeighbours(context,state.sphereCells,idx);
-for id=ids
- if id==ignoreId, continue; end
- if norm(centre-state.centres(id,:)) < radius+state.radii(id)-context.tolerance, return; end
+ids=spSphereNeighbours(context,state.sphereCells,idx);
+ids(ids==ignoreId)=[];
+if ~isempty(ids)
+    delta=state.centres(ids,:)-centre;
+    limit=radius+state.radii(ids)-context.tolerance;
+    limit=limit(:);
+    valid=limit>0;
+    if any(sum(delta(valid,:).^2,2)<limit(valid).^2), return; end
 end
 
 %Check nearby finite triangles so the sphere cannot cross the STL surface.
