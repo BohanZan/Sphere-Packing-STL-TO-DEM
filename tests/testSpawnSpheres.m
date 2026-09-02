@@ -223,6 +223,30 @@ verifyTrue(testCase, spPointInside(context, [0.1 0.1 0.1]*1e-6));
 verifyFalse(testCase, spPointInside(context, [0.8 0.8 0.8]*1e-6));
 end
 
+function testExactPointInsideMatchesScalarReferenceAcrossScales(testCase)
+% Catches parity changes while replacing scalar vertical-ray intersections.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+for scale = [1, 1e-6]
+    context = spBuildContext(spTestCubeMesh(20*scale), 1.0*scale, 0.01*scale, 1e-9);
+    axes = cell(1, 3);
+    for dimension = 1:3
+        axes{dimension} = context.lower(dimension) + ...
+            ((0:context.cellCount(dimension)-1) + 0.5) * context.cellSize;
+    end
+    [x, y, z] = ndgrid(axes{1}, axes{2}, axes{3});
+    cellCentres = [x(:), y(:), z(:)];
+    rng(71, 'twister');
+    points = scale * [10 10 10; 0 0 0; 20 20 20; 20.1 10 10; 20*rand(100,3)];
+    points = [cellCentres; points];
+    for id = 1:size(points, 1)
+        expected = spReferencePointInside(context, points(id,:));
+        verifyEqual(testCase, spExactPointInside(context, points(id,:)), expected);
+        verifyEqual(testCase, spPointInside(context, points(id,:)), expected);
+    end
+end
+end
+
 function testCachedInwardNormalsPointIntoTheClosedMesh(testCase)
 % Catches cached face normals that no longer use the existing ray-probe rule.
 context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
