@@ -1,7 +1,9 @@
 function [state, nextRadius] = spRefill(context, state, radii, nextRadius, options)
 % Algorithm 4: place remaining prescribed radii tangent to active faces.
 %Use gravity-facing surface triangles to refill the difficult boundary region.
-active=spActiveTriangles(context,options.gravity);
+if options.maxRefillPasses < 1 || nextRadius > numel(radii), return; end
+active = find(context.inwardNormals * options.gravity.' > 0).';
+if isempty(active), active = 1:size(context.faces,1); end
 for pass=1:options.maxRefillPasses
  %Record whether this refill sweep found any new feasible sphere centres.
  before=state.count;
@@ -10,7 +12,7 @@ for pass=1:options.maxRefillPasses
   %Sample points on active triangles and offset them along the inward normal.
   for attempt=1:options.maxAttempts
    id=active(randi(numel(active))); tri=context.vertices(context.faces(id,:),:);
-   q=randomTrianglePoint(tri); n=inwardNormal(context,tri);
+   q=randomTrianglePoint(tri); n=context.inwardNormals(id,:);
    if spCanPlace(context,state,q+r*n,r)
     state=spAddSphere(context,state,q+r*n,r);
     state=spReportFillProgress(state,numel(radii));
@@ -31,25 +33,9 @@ for pass=1:options.maxRefillPasses
  if nextRadius>numel(radii), return; end
 end
 end
-function ids=spActiveTriangles(context,gravity)
-%SPACTIVETRIANGLES Select faces whose inward normal points with gravity.
-%Fall back to all faces for geometries with no directional match.
-ids=[];
-for id=1:size(context.faces,1)
- tri=context.vertices(context.faces(id,:),:); n=inwardNormal(context,tri);
- if dot(n,gravity)>0, ids(end+1)=id; end %#ok<AGROW>
-end
-if isempty(ids), ids=1:size(context.faces,1); end
-end
 function q=randomTrianglePoint(tri)
 %RANDOMTRIANGLEPOINT Draw a uniform point from a triangular face.
 %Reflect samples across u+v=1 to preserve uniform barycentric density.
 u=rand; v=rand; if u+v>1, u=1-u; v=1-v; end
 q=tri(1,:)+u*(tri(2,:)-tri(1,:))+v*(tri(3,:)-tri(1,:));
-end
-function n=inwardNormal(context,tri)
-%INWARDNORMAL Orient the face normal using a short point-in-solid probe.
-n=cross(tri(2,:)-tri(1,:),tri(3,:)-tri(1,:)); n=n/norm(n);
-probe=mean(tri,1)+n*max(context.tolerance*100,1e-8*context.cellSize);
-if ~spPointInside(context,probe), n=-n; end
 end

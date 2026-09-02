@@ -223,6 +223,31 @@ verifyTrue(testCase, spPointInside(context, [0.1 0.1 0.1]*1e-6));
 verifyFalse(testCase, spPointInside(context, [0.8 0.8 0.8]*1e-6));
 end
 
+function testCachedInwardNormalsPointIntoTheClosedMesh(testCase)
+% Catches cached face normals that no longer use the existing ray-probe rule.
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
+probeDistance = max(context.tolerance*100, 1e-8*context.cellSize);
+for id = 1:size(context.faces, 1)
+    probe = context.faceCentres(id,:) + probeDistance*context.inwardNormals(id,:);
+    verifyTrue(testCase, spPointInside(context, probe));
+end
+end
+
+function testDisabledRefillLeavesStateAndNextRadiusUnchanged(testCase)
+% Catches a disabled refill pass that mutates packing state.
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
+state = spAddSphere(context, spEmptyState(context), [10 10 10], 1.0);
+before = state;
+options = struct('maxRefillPasses', 0, 'gravity', [0 0 -1]);
+
+[state, nextRadius] = spRefill(context, state, 1.0, 1, options);
+
+verifyEqual(testCase, state.centres, before.centres);
+verifyEqual(testCase, state.radii, before.radii);
+verifyEqual(testCase, state.count, before.count);
+verifyEqual(testCase, nextRadius, 1);
+end
+
 function mesh = cubeMesh(sideLength)
 %CUBEMESH Construct a consistently oriented closed cube for deterministic tests.
 %Use two triangular faces per side to match the STL mesh representation.

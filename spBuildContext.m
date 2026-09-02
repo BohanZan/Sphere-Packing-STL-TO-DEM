@@ -61,10 +61,29 @@ for id=1:size(faces,1)
     end
 end
 
+%Cache the face geometry and orient each normal by the existing ray probe.
+faceVertices = reshape(vertices(faces.', :), 3, size(faces,1), 3);
+faceCentres = reshape(mean(faceVertices, 1), size(faces,1), 3);
+rawNormals = cross(vertices(faces(:,2),:) - vertices(faces(:,1),:), ...
+    vertices(faces(:,3),:) - vertices(faces(:,1),:), 2);
+rawNormals = rawNormals ./ vecnorm(rawNormals, 2, 2);
+probeContext = struct('vertices',vertices,'faces',faces,'lower',lower, ...
+    'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells}, ...
+    'tolerance',tolerance);
+inwardNormals = rawNormals;
+probeDistance = max(tolerance*100, 1e-8*cellSize);
+for id = 1:size(faces,1)
+    probe = faceCentres(id,:) + probeDistance*rawNormals(id,:);
+    if ~spPointInside(probeContext, probe)
+        inwardNormals(id,:) = -rawNormals(id,:);
+    end
+end
+
 %Collect all preprocessed geometry and spatial indexing information.
 context=struct('vertices',vertices,'faces',faces,'lower',lower,'upper',upper,...
     'cellSize',cellSize,'cellCount',count,'triangleCells',{triCells},...
-    'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells},'tolerance',tolerance);
+    'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells},'tolerance',tolerance, ...
+    'faceCentres',faceCentres,'inwardNormals',inwardNormals);
 fprintf('Spatial Grid Discretisation\n');
 fprintf('Grid Cell Edge Length = %.8g\n', cellSize);
 fprintf('Grid Counts Nx=%d; Ny=%d; Nz=%d\n', count(1), count(2), count(3));
