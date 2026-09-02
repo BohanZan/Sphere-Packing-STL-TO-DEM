@@ -247,6 +247,122 @@ for scale = [1, 1e-6]
 end
 end
 
+function testOccupancyHandlesConvexConcaveAndCavityMeshes(testCase)
+% Catches nonconservative classification of solid, concave, and cavity cells.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+cfg = struct('enabled', true, 'cellSize', 0.5, 'maxCells', 2e6);
+convex = spBuildContext(spTestCubeMesh(20), 1.0, 0, 1e-9, cfg);
+concave = spBuildContext(spTestConcavePrism(), 0.25, 0, 1e-9, cfg);
+hollow = spBuildContext(spTestHollowCubeMesh(), 0.5, 0, 1e-9, cfg);
+cases = {convex, [10 10 10], true; convex, [21 10 10], false; ...
+         concave, [0.5 2.0 1.5], true; concave, [2.0 2.0 1.5], false; ...
+         hollow, [2 10 10], true; hollow, [10 10 10], false; hollow, [21 10 10], false};
+for id = 1:size(cases, 1)
+    context = cases{id,1}; point = cases{id,2}; expected = cases{id,3};
+    verifyEqual(testCase, spExactPointInside(context, point), expected);
+    verifyEqual(testCase, spPointInside(context, point), expected);
+end
+end
+
+function testDisabledOccupancyAndClampedCellIndices(testCase)
+% Catches changing the existing four-argument context construction path.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+disabled = spBuildContext(spTestCubeMesh(4), 0.5, 0, 1e-9);
+verifyFalse(testCase, disabled.occupancy.enabled);
+verifyEmpty(testCase, disabled.occupancy.labels);
+point = [2 2 2];
+verifyEqual(testCase, spPointInside(disabled, point), ...
+    spExactPointInside(disabled, point));
+
+cfg = struct('enabled', true, 'cellSize', 0.5, 'maxCells', 2e6);
+enabled = spBuildContext(spTestCubeMesh(4), 0.5, 0, 1e-9, cfg);
+occupancy = enabled.occupancy;
+verifyEqual(testCase, spOccupancyCellIndex(occupancy, [-10 -10 -10]), [1 1 1]);
+verifyEqual(testCase, spOccupancyCellIndex(occupancy, [10 10 10]), occupancy.cellCount);
+verifyEqual(testCase, spOccupancyCellIndex(occupancy, occupancy.lower), [1 1 1]);
+verifyEqual(testCase, spOccupancyCellIndex(occupancy, enabled.upper), occupancy.cellCount);
+end
+
+function testOccupancyGridCapsDenseStorageAndCompletesLabels(testCase)
+% Catches allocating the requested fine grid before applying the hard cap.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+cfg = struct('enabled', true, 'cellSize', 1e-4, 'maxCells', 64);
+context = spBuildContext(spTestCubeMesh(20), 1.0, 0, 1e-9, cfg);
+
+verifyLessThanOrEqual(testCase, prod(double(context.occupancy.cellCount)), cfg.maxCells);
+verifyClass(testCase, context.occupancy.labels, 'uint8');
+verifyFalse(testCase, any(context.occupancy.labels(:) == 3));
+end
+
+function testEveryNonMarginOccupancyCellMatchesExactParity(testCase)
+% Catches a 0/1 shortcut that is not valid throughout its entire cell.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+cfg = struct('enabled', true, 'cellSize', 0.5, 'maxCells', 2e6);
+contexts = {spBuildContext(spTestCubeMesh(4), 0.5, 0, 1e-9, cfg), ...
+    spBuildContext(spTestConcavePrism(), 0.25, 0, 1e-9, cfg), ...
+    spBuildContext(spTestHollowCubeMesh(), 0.5, 0, 1e-9, ...
+        struct('enabled', true, 'cellSize', 2.5, 'maxCells', 2e6))};
+offsets = [-0.49 0 0.49];
+for contextId = 1:numel(contexts)
+    context = contexts{contextId};
+    occupancy = context.occupancy;
+    nonMargin = find(occupancy.labels ~= 2);
+    for linearIndex = nonMargin.'
+        [ix, iy, iz] = ind2sub(occupancy.cellCount, linearIndex);
+        centre = occupancy.lower + ([ix iy iz] - 0.5) * occupancy.cellSize;
+        expected = occupancy.labels(linearIndex) == 1;
+        verifyEqual(testCase, spExactPointInside(context, centre), expected);
+        for dimension = 1:3
+            for offset = offsets
+                point = centre;
+                point(dimension) = point(dimension) + offset * occupancy.cellSize;
+                verifyEqual(testCase, spExactPointInside(context, point), expected);
+                verifyEqual(testCase, spPointInside(context, point), expected);
+            end
+        end
+    end
+end
+end
+
+function testSeededPackingMatchesWithOccupancyDisabledAndEnabled(testCase)
+% Catches occupancy shortcuts changing the accepted seeded sphere assembly.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+disabledOutput = tempname;
+enabledOutput = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(disabledOutput));
+cleanup2 = onCleanup(@() removeOutputDirectory(enabledOutput));
+baseOptions = struct('randomSeed', 53, 'coordinateFrame', 'world', ...
+    'maxCompressionSweeps', 8, 'shakeSweeps', 1, 'maxRefillPasses', 1, ...
+    'occupancyCellSize', 0.5, 'occupancyMaxCells', 2e6);
+disabledOptions = baseOptions;
+disabledOptions.occupancyAcceleration = false;
+disabledOptions.outputDirectory = disabledOutput;
+disabledOptions.outputPrefix = 'disabled';
+enabledOptions = baseOptions;
+enabledOptions.occupancyAcceleration = true;
+enabledOptions.outputDirectory = enabledOutput;
+enabledOptions.outputPrefix = 'enabled';
+
+[disabledAssembly, disabledMasses, disabledVolume, disabledInertia, disabledReport] = ...
+    spawnSpheres(spTestCubeMesh(20), [0.5; 0.75; 1.0; 1.25], 300, 0.01, disabledOptions);
+[enabledAssembly, enabledMasses, enabledVolume, enabledInertia, enabledReport] = ...
+    spawnSpheres(spTestCubeMesh(20), [0.5; 0.75; 1.0; 1.25], 300, 0.01, enabledOptions);
+
+verifyEqual(testCase, enabledAssembly, disabledAssembly, 'AbsTol', 1e-12);
+verifyEqual(testCase, enabledMasses, disabledMasses, 'AbsTol', 1e-12);
+verifyEqual(testCase, enabledVolume, disabledVolume, 'AbsTol', 1e-12);
+verifyEqual(testCase, enabledInertia, disabledInertia, 'AbsTol', 1e-12);
+verifyEqual(testCase, enabledReport.acceptedCount, disabledReport.acceptedCount);
+verifyEqual(testCase, enabledReport.sphereAssemblyVolume / enabledReport.stlVolume, ...
+    disabledReport.sphereAssemblyVolume / disabledReport.stlVolume, 'AbsTol', 1e-12);
+clear cleanup cleanup2
+end
+
 function testCachedInwardNormalsPointIntoTheClosedMesh(testCase)
 % Catches cached face normals that no longer use the existing ray-probe rule.
 context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
