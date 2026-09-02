@@ -306,7 +306,7 @@ addpath(fullfile(root, 'tests', 'helpers'));
 context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
 context.cellSize = 5;
 context.cellCount = [4 4 4];
-state = spEmptyState(context);
+state = spEmptyState(context, 27);
 for ix = 1:3
     for iy = 1:3
         for iz = 1:3
@@ -332,9 +332,78 @@ function testCanPlaceKeepsSphereOverlapAndIgnoreIdSemantics(testCase)
 root = fileparts(fileparts(mfilename('fullpath')));
 addpath(fullfile(root, 'tests', 'helpers'));
 context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
-state = spAddSphere(context, spEmptyState(context), [10 10 10], 1);
+state = spAddSphere(context, spEmptyState(context, 1), [10 10 10], 1);
 verifyFalse(testCase, spCanPlace(context, state, [10.5 10 10], 1));
 verifyTrue(testCase, spCanPlace(context, state, [10.5 10 10], 1, 1));
+end
+
+function testPreallocatedStateDoesNotExposeUnacceptedRows(testCase)
+% Catches capacity-tail rows leaking into an assembly or its sphere CSV.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(2.10), 1, 0.01, 1e-9);
+state = spEmptyState(context, 4);
+verifySize(testCase, state.centres, [4 3]);
+verifySize(testCase, state.radii, [4 1]);
+verifySize(testCase, state.cellIndices, [4 3]);
+verifyEqual(testCase, state.count, 0);
+
+outputDirectory = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(outputDirectory));
+options = struct('randomSeed', 43, 'outputDirectory', outputDirectory, ...
+    'outputPrefix', 'partial', 'coordinateFrame', 'world', ...
+    'maxCompressionSweeps', 0, 'shakeSweeps', 0, 'maxRefillPasses', 0);
+[assembly, masses, ~, ~, report] = ...
+    spawnSpheres(spTestCubeMesh(2.10), [1; 1; 1; 1], 100, 0.01, options);
+sphereTable = readtable(report.outputFiles{1});
+verifyLessThan(testCase, report.acceptedCount, 4);
+verifySize(testCase, assembly, [4 report.acceptedCount]);
+verifyEqual(testCase, numel(masses), report.acceptedCount);
+verifyEqual(testCase, height(sphereTable), report.acceptedCount);
+clear cleanup
+end
+
+function testIncrementalReindexMatchesFullRebuild(testCase)
+% Catches moved IDs that leave stale, duplicate, or missing hash entries.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
+context.cellSize = 5;
+context.cellCount = [4 4 4];
+state = spEmptyState(context, 3);
+state = spAddSphere(context, state, [2.5 2.5 2.5], 0.1);
+state = spAddSphere(context, state, [7.5 2.5 2.5], 0.1);
+state = spAddSphere(context, state, [12.5 2.5 2.5], 0.1);
+
+state.centres(1,:) = [17.5 2.5 2.5];
+incremental = spReindex(context, state, 1);
+rebuilt = spReindex(context, incremental);
+verifySphereHashesEqual(testCase, incremental.sphereCells, rebuilt.sphereCells);
+verifyEqual(testCase, incremental.cellIndices(1:incremental.count,:), ...
+    rebuilt.cellIndices(1:rebuilt.count,:));
+
+sameCell = incremental;
+sameCell.centres(2,:) = [7.7 2.5 2.5];
+sameCell = spReindex(context, sameCell, 2);
+rebuiltSameCell = spReindex(context, sameCell);
+verifySphereHashesEqual(testCase, sameCell.sphereCells, rebuiltSameCell.sphereCells);
+end
+
+function testRelaxedStateIncrementalHashMatchesFullRebuild(testCase)
+% Catches a relaxation sweep leaving map membership behind a moved centre.
+root = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(root, 'tests', 'helpers'));
+context = spBuildContext(spTestCubeMesh(20), 1, 0.01, 1e-9);
+state = spEmptyState(context, 2);
+state = spAddSphere(context, state, [6 6 10], 1);
+state = spAddSphere(context, state, [14 14 10], 1);
+options = struct('maxCompressionSweeps', 1, 'shakeSweeps', 0, ...
+    'compressionTolerance', 1e-5);
+relaxed = spRelax(context, state, [0 0 -1], options, true);
+rebuilt = spReindex(context, relaxed);
+verifySphereHashesEqual(testCase, relaxed.sphereCells, rebuilt.sphereCells);
+verifyEqual(testCase, relaxed.cellIndices(1:relaxed.count,:), ...
+    rebuilt.cellIndices(1:rebuilt.count,:));
 end
 
 function testOccupancyHandlesConvexConcaveAndCavityMeshes(testCase)
@@ -466,7 +535,7 @@ end
 function testDisabledRefillLeavesStateAndNextRadiusUnchanged(testCase)
 % Catches a disabled refill pass that mutates packing state.
 context = spBuildContext(spTestCubeMesh(20), 1.0, 0.01, 1e-9);
-state = spAddSphere(context, spEmptyState(context), [10 10 10], 1.0);
+state = spAddSphere(context, spEmptyState(context, 1), [10 10 10], 1.0);
 before = state;
 options = struct('maxRefillPasses', 0, 'gravity', [0 0 -1]);
 
@@ -492,5 +561,15 @@ function removeOutputDirectory(pathName)
 %REMOVEOUTPUTDIRECTORY Delete one test-only temporary output directory.
 if isfolder(pathName)
     rmdir(pathName, 's');
+end
+end
+
+function verifySphereHashesEqual(testCase, actual, expected)
+%VERIFYSPHEREHASHESEQUAL Compare sparse maps without relying on key order.
+actualKeys = sort(keys(actual));
+expectedKeys = sort(keys(expected));
+verifyEqual(testCase, actualKeys, expectedKeys);
+for id = 1:numel(actualKeys)
+    verifyEqual(testCase, sort(actual(actualKeys{id})), sort(expected(actualKeys{id})));
 end
 end

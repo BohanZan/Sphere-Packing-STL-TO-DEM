@@ -17,7 +17,7 @@ options = spDefaultOptions(options, maxAttempts, buffer, model);
 occupancyOptions = struct('enabled', options.occupancyAcceleration, ...
     'cellSize', options.occupancyCellSize, 'maxCells', options.occupancyMaxCells);
 context = spBuildContext(model, max(radii), options.buffer, options.tolerance, occupancyOptions);
-state = spEmptyState(context);
+state = spEmptyState(context, numel(radii));
 
 %Populate the interior from random trial centres, followed by relaxation.
 nextRadius = 1;
@@ -39,8 +39,10 @@ if nextRadius <= numel(radii)
 end
 
 %Calculate volume, mass and centre of mass in the original world frame.
-worldCentres = state.centres;
-unitVolumes = (4/3) * pi * state.radii.^3;
+validIds = 1:state.count;
+worldCentres = state.centres(validIds,:);
+acceptedRadii = state.radii(validIds);
+unitVolumes = (4/3) * pi * acceptedRadii.^3;
 masses = (options.density * unitVolumes).';
 totalVolume = sum(unitVolumes);
 centreOfMass = zeros(3, 1);
@@ -59,8 +61,8 @@ else
 end
 
 %Assemble the DEM array and calculate inertia about the physical centre of mass.
-assembly = [outputCentres.'; state.radii.'];
-inertia = spInertia(centredCentres, state.radii, masses.');
+assembly = [outputCentres.'; acceptedRadii.'];
+inertia = spInertia(centredCentres, acceptedRadii, masses.');
 stlVolume = spSignedMeshVolume(context.vertices, context.faces);
 report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ...
     'unplacedCount', numel(radii) - state.count, 'stopReason', 'completed', ...
