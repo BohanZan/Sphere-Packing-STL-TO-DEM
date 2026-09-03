@@ -1,8 +1,9 @@
 function [assembly, masses, totalVolume, inertia, report] = spawnSpheres(model, radii, maxAttempts, buffer, options)
 %SPAWNSPHERES Static non-overlapping packing in a closed STL domain.
-%   RADII is an ordered radius sequence.  Each value is attempted exactly
-%   once in the initial-placement phase; remaining values are offered to the
-%   boundary-refilling phase.  MODEL may be an STL filename or a mesh struct.
+%   RADII is an ordered radius sequence. Initial placement runs in batches;
+%   each batch stops after three empty placement attempts, then a nonempty
+%   batch is compressed and shaken. MODEL may be an STL filename or a mesh
+%   struct.
 
 %Normalise optional inputs and validate the prescribed sphere-size sequence.
 if nargin < 5, options = struct; end
@@ -19,18 +20,39 @@ occupancyOptions = struct('enabled', options.occupancyAcceleration, ...
 context = spBuildContext(model, max(radii), options.buffer, options.tolerance, occupancyOptions);
 state = spEmptyState(context, numel(radii));
 
-%Populate the interior from random trial centres, followed by relaxation.
+%Generate and settle initial-packing batches following Algorithm 4.
 nextRadius = 1;
-failedInitialBatches = 0;
-while nextRadius <= numel(radii) && failedInitialBatches <= options.maxInitialFailures
-    before = state.count;
-    [state, nextRadius] = spInitialPlacement(context, state, radii, nextRadius, options);
-    if state.count == before
-        failedInitialBatches = failedInitialBatches + 1;
+initialFailures = 0;
+while nextRadius <= numel(radii)
+    batchStart = state.count + 1;
+    batchRejects = 0;
+
+    % Do not relax between empty initial-placement attempts. A batch ends
+    % only after its third attempt that places no new sphere.
+    while nextRadius <= numel(radii) && batchRejects <= 2
+        before = state.count;
+        [state, nextRadius] = spInitialPlacement(context, state, radii, nextRadius, options);
+        if state.count == before
+            batchRejects = batchRejects + 1;
+        end
+    end
+
+    initialFailures = initialFailures + batchRejects;
+    if state.count < batchStart
         break;
     end
+
+    % A nonempty batch alone receives Algorithm 2 then Algorithm 3.
     state = spRelax(context, state, options.gravity, options, true);
     state = spRelax(context, state, options.gravity, options, false);
+
+    % Stop initial packing when this batch reaches within one grid spacing
+    % of the upper Z boundary; unresolved radii proceed to refilling.
+    batchIds = batchStart:state.count;
+    batchTop = max(state.centres(batchIds,3) + state.radii(batchIds));
+    if batchTop > context.upper(3) - context.cellSize
+        break;
+    end
 end
 
 %Try unresolved radii again by generating candidates on active surface faces.
@@ -67,7 +89,7 @@ stlVolume = spSignedMeshVolume(context.vertices, context.faces);
 report = struct('requestedCount', numel(radii), 'acceptedCount', state.count, ...
     'unplacedCount', numel(radii) - state.count, 'stopReason', 'completed', ...
     'capacityWarning', false, 'nextUnplacedRadiusIndex', nextRadius, ...
-    'initialFailures', failedInitialBatches, 'refillPasses', options.maxRefillPasses, ...
+    'initialFailures', initialFailures, 'refillPasses', options.maxRefillPasses, ...
     'boundingBoxDimensions', context.upper-context.lower, 'stlVolume', stlVolume, ...
     'sphereAssemblyVolume', totalVolume, 'totalMass', sum(masses), ...
     'centreOfMass', centreOfMass, 'coordinateFrame', options.coordinateFrame, ...
@@ -94,7 +116,7 @@ function options = spDefaultOptions(options, maxAttempts, buffer, model)
 %Define physical, numerical and output defaults for a reproducible run.
 defaults = struct('buffer', buffer, 'maxAttempts', maxAttempts, ...
     'gravity', [0 0 -1], 'tolerance', 1e-9, 'compressionTolerance', 1e-5, ...
-    'maxCompressionSweeps', 100, 'shakeSweeps', 2, 'maxInitialFailures', 2, ...
+    'maxCompressionSweeps', 100, 'shakeSweeps', 2, ...
     'maxRefillPasses', 3, 'randomSeed', [], 'outputDirectory', '', 'outputPrefix', '', ...
     'density', 1.0, 'coordinateFrame', 'center_of_mass', ...
     'occupancyAcceleration', true, 'occupancyCellSize', [], 'occupancyMaxCells', 2e6);

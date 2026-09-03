@@ -1,22 +1,25 @@
 function ids = spSphereNeighbours(context, hash, index)
 %SPSPHERENEIGHBOURS Return sphere IDs from INDEX and its 26 neighbours.
 %Each sphere is indexed in one spatial cell, so this query needs no unique.
-parts = cell(27, 1);
-partCount = 0;
-for ix = max(1, index(1)-1):min(context.cellCount(1), index(1)+1)
-    for iy = max(1, index(2)-1):min(context.cellCount(2), index(2)+1)
-        for iz = max(1, index(3)-1):min(context.cellCount(3), index(3)+1)
-            key = sprintf('%d,%d,%d', ix, iy, iz);
-            if isKey(hash, key)
-                partCount = partCount + 1;
-                parts{partCount} = hash(key);
-            end
-        end
-    end
-end
-if partCount == 0
+%Batch the map membership and value lookups; calling containers.Map once per
+%neighbour cell otherwise dominates this very small (at most 27-cell) query.
+cellCount = context.cellCount;
+lo = max(index - 1, 1);
+hi = min(index + 1, cellCount);
+x = lo(1):hi(1);
+y = lo(2):hi(2);
+z = lo(3):hi(3);
+xKeys = cellstr(string(x));
+yKeys = cellstr(string(y));
+zKeys = cellstr(string(z));
+keys = strcat(repelem(xKeys, numel(y) * numel(z)), ',', ...
+    repmat(repelem(yKeys, numel(z)), 1, numel(x)), ',', ...
+    repmat(zKeys, 1, numel(x) * numel(y)));
+present = isKey(hash, keys);
+if ~any(present)
     ids = [];
 else
-    ids = [parts{1:partCount}];
+    parts = values(hash, keys(present));
+    ids = [parts{:}];
 end
 end

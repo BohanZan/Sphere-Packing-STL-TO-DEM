@@ -94,6 +94,19 @@ verifyEqual(testCase, report.requestedCount, 2);
 verifyEqual(testCase, report.acceptedCount, size(assembly, 2));
 end
 
+function testInitialPackingAllowsThreeEmptyPlacementAttempts(testCase)
+% A nonempty batch may be compacted only after three later empty attempts.
+out = tempname;
+cleanup = onCleanup(@() removeOutputDirectory(out));
+options = struct('randomSeed', 41, 'outputDirectory', out, ...
+    'maxCompressionSweeps', 0, 'shakeSweeps', 0, 'maxRefillPasses', 0);
+[~, ~, ~, ~, report] = spawnSpheres(cubeMesh(2.10), [1.0; 1.0], 10, 0.01, options);
+
+verifyEqual(testCase, report.acceptedCount, 1);
+verifyEqual(testCase, report.initialFailures, 3);
+clear cleanup
+end
+
 function testWritesHeaderedCommaSeparatedCsvOutputs(testCase)
 % Catches regressions to headerless or non-CSV result output.
 rng(19, 'twister');

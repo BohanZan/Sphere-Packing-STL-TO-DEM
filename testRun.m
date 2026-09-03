@@ -12,7 +12,7 @@ fileName = '.\inputs\ironParticle\ironParticle.stl';
 % =============================================================
 % One entry represents one requested DEM sphere. Replace this array later
 % with radii sampled from a particle-size frequency distribution.
-nTarget = 1000;
+nTarget = 200;
 uniformRadius = 1.0e-6;
 radii = repmat(uniformRadius, nTarget, 1);
 
