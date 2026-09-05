@@ -28,10 +28,11 @@ for id = 1:size(faces,1)
     triangle = vertices(faces(id,:), :);
     triangleExtent(id,:) = max(triangle, [], 1) - min(triangle, [], 1);
 end
-% Keep the grid sparse in both storage and construction. A cell may hold
-% many spheres; making it at least as wide as the largest face prevents a
-% large STL facet from being expanded into billions of indexed cells.
-cellSize = max(2 * maxRadius + buffer, max(triangleExtent(:)));
+% Prefer a moderately finer grid when a coarse STL contains isolated large
+% faces. Each face is still indexed in every cell it spans, so this changes
+% candidate-list size only, not geometric coverage.
+largeFaceCellFloor = 0.5 * max(triangleExtent(:));
+cellSize = max(2 * maxRadius + buffer, largeFaceCellFloor);
 count = max(1, ceil((upper - lower) / cellSize));
 
 % A sparse hash is essential: the geometric grid can have billions of
@@ -51,10 +52,11 @@ for id = 1:size(faces,1)
     end
 end
 
-%Construct a separate XY hash for downward-ray point-in-solid tests.
-span = max(upper(1:2)-lower(1:2));
-xySize = max(maxRadius, span / max(1, ceil(span / cellSize)));
-xyCount = max(1, ceil((upper(1:2)-lower(1:2)) / xySize));
+%Store the downward-ray projection in the XY layers of the same main grid.
+%It remains a 2-D hash to avoid duplicating faces along Z, but shares the
+%main grid origin, edge length and XY cell partition exactly.
+xySize = cellSize;
+xyCount = count(1:2);
 xyCells = containers.Map('KeyType', 'char', 'ValueType', 'any');
 for id=1:size(faces,1)
     tri=vertices(faces(id,:),1:2); lo=toXY(min(tri,[],1)); hi=toXY(max(tri,[],1));
@@ -88,14 +90,9 @@ rawNormals = rawNormals ./ vecnorm(rawNormals, 2, 2);
 probeContext = struct('vertices',vertices,'faces',faces,'lower',lower, ...
     'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells}, ...
     'tolerance',tolerance,'ray',ray);
-inwardNormals = rawNormals;
 probeDistance = max(tolerance*100, 1e-8*cellSize);
-for id = 1:size(faces,1)
-    probe = faceCentres(id,:) + probeDistance*rawNormals(id,:);
-    if ~spPointInside(probeContext, probe)
-        inwardNormals(id,:) = -rawNormals(id,:);
-    end
-end
+inwardNormals = spOrientInwardNormals( ...
+    faceCentres, rawNormals, probeDistance, probeContext);
 
 %Collect all preprocessed geometry and spatial indexing information.
 context=struct('vertices',vertices,'faces',faces,'lower',lower,'upper',upper,...

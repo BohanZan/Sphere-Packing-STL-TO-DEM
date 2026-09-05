@@ -5,29 +5,30 @@ close all;
 %% ============================================================
 %  Input STL
 % =============================================================
-fileName = '.\inputs\ironParticle\ironParticle.stl';
+fileName = '.\inputs\greatBudda\greatBudda.stl';
 
 %% ============================================================
 %  Sphere-packing parameters
 % =============================================================
 % One entry represents one requested DEM sphere. Replace this array later
 % with radii sampled from a particle-size frequency distribution.
-nTarget = 200;
-uniformRadius = 1.0e-6;
+nTarget = 50;
+uniformRadius = 0.625;
 radii = repmat(uniformRadius, nTarget, 1);
 
-maxAttempts = 100;
+maxAttempts = 60;
 buffer = 0.0;
 density = 1.0;
 
 options = struct;
 options.gravity = [0, 0, -1];
 options.density = density;
-options.maxCompressionSweeps = 100;
-options.shakeSweeps = 2;
-options.maxRefillPasses = 3;
-options.outputDirectory = './results';
-options.outputPrefix = 'Lily_Maria_packing';
+options.maxCompressionSweeps = 200;
+options.compressionTolerance = 1e-7;
+options.shakeSweeps = 5;
+options.maxRefillPasses = 6;
+options.outputDirectory = './results/Great_Budda_profiling';
+options.outputPrefix = 'Great_Budda_packing';
 options.coordinateFrame = 'world'; % Choose 'world' or 'center_of_mass'.
 % options.randomSeed = 42; % Uncomment to make a run reproducible.
 
