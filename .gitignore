@@ -3,11 +3,14 @@ Reference/
 docs/
 tmp/
 results/
-tests/
-!tests/
-!tests/*.m
 build/
 *.obj
 *.pdb
 *.ilk
 cpp/benchmarks/output/
+benchmarks/output/
+__pycache__/
+*.pyc
+matlab_baseline/
+benchmarks/
+tests/
