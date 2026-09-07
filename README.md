@@ -1,39 +1,28 @@
-# SpherePacking MATLAB
+**Haven't finished the User guide.** Contact me at:
 
-Static non-overlapping sphere packing in a closed STL domain. The MATLAB
-packing flow follows the current sibling `SpherePacking-cpp` implementation.
-See [the comparison and verification notes](CPP_ALIGNMENT.md) for the function
-mapping, execution order, and floating-point limits.
+**hustler_lee@sjtu.edu.cn**
 
-```matlab
-options = struct('initialRelaxationScope','layer', ...
-    'maxCompressionSweeps',Inf,'randomSeed',42);
-[assembly,masses,volume,inertia,report] = ...
-    spawnSpheres(model,radii,1000,0,options);
-```
+Backup mails:
 
-`model` is an STL filename (using the installed `stlRead`) or a struct containing
-`vertices` and triangular `faces`. Radii are processed in the supplied order.
-`assembly` contains one sphere per column: `[x;y;z;radius]`.
+2938304843@qq.com,
 
-- Omitted/zero buffer selects the maximum input radius. It sets both grid
-  padding and the maximum length of each compression or shake move.
-- The default initial relaxation scope is `'layer'`; `'batch'` and `'all'`
-  select the other C++ policies. Refilling always moves only its new batch.
-- The default sweep limit is `Inf`, so energy determines convergence. A finite
-  limit raises an error if convergence is not reached. Use `0` to disable motion.
-- The default seed is `42`. It repeats MATLAB runs; native C++ random draws
-  differ even with the same seed.
-- Four CSV files retain the existing sphere, summary, grid-point and
-  hexahedron formats, with 17 significant digits for numeric output.
+bohzan@yandex.ru.
 
-`testRun.m` uses the C++ Buddha preset parameters: 44,000 spheres of radius 0.3.
+It's easier to use the recommended faster branch in C++ language:
 
-Run checks from this directory:
+`main-cpp`
 
-```matlab
-addpath(pwd,fullfile(pwd,'tests','helpers'));
-assertSuccess(runtests(fullfile(pwd,'tests')));
-addpath(fullfile(pwd,'tests'));
-runCppParity; % Requires the built sibling C++ executable.
-```
+Dependences for MATLAB version:
+---
+Ray/Triangle Intersection version 1.0 (https://uk.mathworks.com/matlabcentral/profile/authors/1927554-jesus-p-mena-chalco)
+Stl volume calculation versio 1.0 (https://uk.mathworks.com/matlabcentral/fileexchange/26982-volume-of-a-surface-triangulation) 
+You need to going to the file, modify the definition of the function `rayTriangleIntersection` by adding another argument myEps (as the last) and set: `epsilon = myEps`.
+stlTools version 1.1 (https://uk.mathworks.com/matlabcentral/profile/authors/402762-pau-mico)
+
+References:
+---
+Li, Naiping, et al. "An efficient dense spheres packing method in complex domains for 3D DEM simulations." Powder Technology (2026): 122583.
+
+Zhang, Duan Z., et al. "Rapid particle generation from an STL file and related issues in the application of material point methods to complex objects." Computational Particle Mechanics 11.5 (2024): 2291-2305.
+
+Haeri, Sina. "Optimisation of blade type spreaders for powder bed preparation in Additive Manufacturing using DEM simulations." Powder Technology 321 (2017): 94-104.
