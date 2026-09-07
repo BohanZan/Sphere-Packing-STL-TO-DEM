@@ -45,6 +45,13 @@ end
 
 function inwardNormals = orientSerial(faceCentres, rawNormals, probeDistance, probeContext)
 inwardNormals = rawNormals;
+if ~(isfield(probeContext,'occupancy') && probeContext.occupancy.enabled)
+    probes=faceCentres+probeDistance*rawNormals;
+    inside=spExactPointInsideBatch(probeContext,probes);
+    inwardNormals(~inside,:)=-rawNormals(~inside,:);
+    return
+end
+% Saved/custom occupancy contexts retain their existing label shortcut.
 for id = 1:size(rawNormals, 1)
     probe = faceCentres(id,:) + probeDistance * rawNormals(id,:);
     if ~spPointInside(probeContext, probe)

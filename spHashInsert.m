@@ -1,7 +1,8 @@
-function spHashInsert(hash, index, id)
+function spHashInsert(hash, index, id, spec)
 %SPHASHINSERT Append ID to the sparse 3-D cell INDEX.
-%Encode the integer cell index because containers.Map uses string keys.
-key = sprintf('%d,%d,%d', index(1), index(2), index(3));
+% The grid encoding is immutable; sphere buckets remain independent ID vectors.
+key = spCellKeys(index,spec);
+if iscell(key), key=key{1}; end
 
 %Preserve prior members when the cell is already occupied.
 if isKey(hash, key)

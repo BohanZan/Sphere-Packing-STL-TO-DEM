@@ -2,6 +2,11 @@ function yes = spCanPlace(context, state, centre, radius, ignoreId)
 %SPCANPLACE Test one candidate sphere against bounds, spheres and STL faces.
 yes=false;
 if nargin<5, ignoreId=0; end
+if numel(centre)~=3 || ~isreal(centre) || any(~isfinite(centre(:))) || ...
+ ~isscalar(radius) || ~isreal(radius) || ~isfinite(radius) || radius<=0
+ return;
+end
+centre=centre(:).';
 
 %Reject centres whose enclosing sphere leaves the axis-aligned STL bounds.
 if any(centre-radius<context.lower) || any(centre+radius>context.upper), return; end
@@ -19,27 +24,21 @@ if ~isempty(ids)
     if any(sum(delta(valid,:).^2,2)<limit(valid).^2), return; end
 end
 
-%Collect only cells intersecting this sphere's AABB (at most 2-by-2-by-2).
+if isstruct(context.triangleCells) && isfield(context.triangleCells,'centreCoverage') && ...
+        context.triangleCells.centreCoverage
+    % The complete finite distance band already contains every face that
+    % can touch a sphere with its centre in this cell.
+    triIds=spGridLookup(context.triangleCells,spCellKeys(idx,context.cellKeySpec));
+else
+% Legacy AABB indices require all cells intersecting this sphere's AABB.
 cellLower=context.lower+(idx-1).*context.cellSize;
 lo=idx-(centre-radius<cellLower);
 hi=idx+(centre+radius>=cellLower+context.cellSize);
 lo=min(max(lo,1),context.cellCount);
 hi=min(max(hi,1),context.cellCount);
-parts=cell(8,1);
-partCount=0;
-triangleCells=context.triangleCells;
-for ix=lo(1):hi(1)
-    for iy=lo(2):hi(2)
-        for iz=lo(3):hi(3)
-            key=sprintf('%d,%d,%d',ix,iy,iz);
-            if isKey(triangleCells,key)
-                partCount=partCount+1;
-                parts{partCount}=triangleCells(key);
-            end
-        end
-    end
+triIds=spGridLookup(context.triangleCells,spBoxCellKeys(lo,hi,context.cellKeySpec));
+triIds=unique(triIds);
 end
-if partCount==0, triIds=[]; else, triIds=unique([parts{1:partCount}]); end
 if spSphereHitsTriangles(context,centre,radius,triIds), return; end
 
 %Use parity after every local geometric rejection has passed.

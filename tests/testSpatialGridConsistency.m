@@ -6,7 +6,7 @@ end
 function testRayGridUsesMainGridSpacingAndCounts(testCase)
 % A tall box makes the old independently fitted XY grid use a different
 % spacing from the 3-D triangle/sphere grid.
-model = rectangularBoxMesh([0 0 0], [10 7 100]);
+model = rectangularBoxMesh([0 0 0], [2 1.4 20]);
 context = spBuildContext(model, 0.25, 0, 1e-9);
 
 verifyEqual(testCase, context.xySize, context.cellSize);

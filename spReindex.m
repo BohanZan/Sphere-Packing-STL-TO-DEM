@@ -1,11 +1,11 @@
 function state = spReindex(context, state, movedIds)
 %SPREINDEX Rebuild all sphere cells or update only known moved sphere IDs.
 if nargin < 3 || isempty(movedIds)
-    state.sphereCells=containers.Map('KeyType','char','ValueType','any');
+    state.sphereCells=containers.Map('KeyType',context.cellKeySpec.keyType,'ValueType','any');
     for id=1:state.count
         idx=spCellIndex(context,state.centres(id,:));
         state.cellIndices(id,:)=idx;
-        spHashInsert(state.sphereCells,idx,id);
+        spHashInsert(state.sphereCells,idx,id,context.cellKeySpec);
     end
     return
 end
@@ -19,7 +19,8 @@ for id=movedIds(:).'
     newIndex=spCellIndex(context,state.centres(id,:));
     if isequal(oldIndex,newIndex), continue; end
 
-    oldKey=sprintf('%d,%d,%d',oldIndex(1),oldIndex(2),oldIndex(3));
+    oldKey=spCellKeys(oldIndex,context.cellKeySpec);
+    if iscell(oldKey), oldKey=oldKey{1}; end
     if ~isKey(state.sphereCells,oldKey)
         error('SpherePacking:MissingSphereCell', ...
             'The previous sparse cell is missing an accepted sphere.');
@@ -36,7 +37,7 @@ for id=movedIds(:).'
     else
         state.sphereCells(oldKey)=members;
     end
-    spHashInsert(state.sphereCells,newIndex,id);
+    spHashInsert(state.sphereCells,newIndex,id,context.cellKeySpec);
     state.cellIndices(id,:)=newIndex;
 end
 end

@@ -4,13 +4,14 @@ function occupancy = spBuildOccupancyGrid(context, maxRadius, options)
 % to the exact ray-parity test).  The temporary value 3 is never returned.
 
 width = options.cellSize;
-if isempty(width)
+if isempty(width) || width==0
     width = max(maxRadius / 2, 32 * context.tolerance);
 end
 count = max(1, ceil((context.upper - context.lower) ./ width));
 cellTotal = prod(double(count));
 while cellTotal > options.maxCells
     width = width * ceil((cellTotal / options.maxCells)^(1/3));
+    if ~isfinite(width), error('SpherePacking:OccupancyOverflow','Occupancy spacing overflow.'); end
     count = max(1, ceil((context.upper - context.lower) ./ width));
     cellTotal = prod(double(count));
 end
@@ -19,7 +20,9 @@ occupancy = struct('enabled', true, 'lower', context.lower, 'cellSize', width, .
     'cellCount', count, 'labels', []);
 labels = 3 * ones(count, 'uint8');
 margin = false(count);
-halo = max(context.tolerance, 8 * eps(max(abs(context.vertices(:)))));
+% Keep the original AABB margin: tolerant ray parity can change at projected
+% seams far from the physical surface. Surface-only components are unsafe.
+halo = max(context.tolerance, 8 * eps(max(abs([context.lower context.upper]))));
 for triangleId = 1:size(context.faces, 1)
     triangle = context.vertices(context.faces(triangleId,:), :);
     lowerIndex = spOccupancyCellIndex(occupancy, min(triangle, [], 1) - width - halo);
@@ -31,22 +34,12 @@ labels(margin) = 2;
 
 % One reusable FIFO labels 6-connected non-margin components without recursion.
 fifo = zeros(cellTotal, 1, 'uint32');
-for iy = 1:count(2)
-    for iz = 1:count(3)
-        floodBoundary(sub2ind(count, 1, iy, iz));
-        floodBoundary(sub2ind(count, count(1), iy, iz));
-    end
-end
-for ix = 1:count(1)
-    for iz = 1:count(3)
-        floodBoundary(sub2ind(count, ix, 1, iz));
-        floodBoundary(sub2ind(count, ix, count(2), iz));
-    end
-end
-for ix = 1:count(1)
-    for iy = 1:count(2)
-        floodBoundary(sub2ind(count, ix, iy, 1));
-        floodBoundary(sub2ind(count, ix, iy, count(3)));
+%Visit linear seeds in X-fastest order, exactly as the C++ occupancy array.
+for seed = 1:cellTotal
+    if labels(seed)~=3, continue; end
+    [ix,iy,iz]=ind2sub(count,seed);
+    if any([ix iy iz]==1 | [ix iy iz]==count)
+        floodComponent(seed,0);
     end
 end
 
@@ -64,35 +57,30 @@ if any(labels(:) == 3)
 end
 occupancy.labels = labels;
 
-    function floodBoundary(seed)
-        if labels(seed) == 3
-            floodComponent(seed, 0);
-        end
-    end
-
     function componentLength = floodComponent(seed, value)
         head = 1;
         componentLength = 1;
         fifo(1) = uint32(seed);
         labels(seed) = value;
-        % Process small FIFO batches so large connected components do not
-        % spend one MATLAB function call per neighbour.
+        %Expand one FIFO entry at a time: X-/X+, Y-/Y+, then Z-/Z+.
+        %Do not sort neighbours; their discovery order fixes the traversal.
+        strides=[1,count(1),count(1)*count(2)];
         while head <= componentLength
-            batchEnd = min(componentLength, head + 4095);
-            current = double(fifo(head:batchEnd));
-            head = batchEnd + 1;
+            current = double(fifo(head));
+            head = head + 1;
             [cellX, cellY, cellZ] = ind2sub(count, current);
-            neighbours = [current(cellX > 1) - 1; current(cellX < count(1)) + 1; ...
-                current(cellY > 1) - count(1); current(cellY < count(2)) + count(1); ...
-                current(cellZ > 1) - count(1)*count(2); ...
-                current(cellZ < count(3)) + count(1)*count(2)];
-            neighbours = unique(neighbours);
-            neighbours = neighbours(labels(neighbours) == 3);
-            if isempty(neighbours), continue; end
-            labels(neighbours) = value;
-            next = componentLength + (1:numel(neighbours));
-            fifo(next) = uint32(neighbours);
-            componentLength = next(end);
+            index=[cellX cellY cellZ];
+            for axis=1:3
+                for direction=[-1 1]
+                    coordinate=index(axis)+direction;
+                    if coordinate<1 || coordinate>count(axis), continue; end
+                    neighbour=current+direction*strides(axis);
+                    if labels(neighbour)~=3, continue; end
+                    labels(neighbour)=value;
+                    componentLength=componentLength+1;
+                    fifo(componentLength)=uint32(neighbour);
+                end
+            end
         end
     end
 

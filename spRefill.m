@@ -1,37 +1,82 @@
 function [state, nextRadius] = spRefill(context, state, radii, nextRadius, options)
 % Algorithm 4: place remaining prescribed radii tangent to active faces.
-%Use gravity-facing surface triangles to refill the difficult boundary region.
-if options.maxRefillPasses < 1 || nextRadius > numel(radii), return; end
-active = find(context.inwardNormals * options.gravity.' > 0).';
-if isempty(active), active = 1:size(context.faces,1); end
-for pass=1:options.maxRefillPasses
- %Record whether this refill sweep found any new feasible sphere centres.
- before=state.count;
- while nextRadius<=numel(radii)
-  r=radii(nextRadius); placed=false;
-  %Sample points on active triangles and offset them along the inward normal.
-  for attempt=1:options.maxAttempts
-   id=active(randi(numel(active))); tri=context.vertices(context.faces(id,:),:);
-   q=randomTrianglePoint(tri); n=context.inwardNormals(id,:);
-   if spCanPlace(context,state,q+r*n,r)
-    state=spAddSphere(context,state,q+r*n,r);
-    state=spReportFillProgress(state,numel(radii));
-    placed=true;
-    break;
-   end
-  end
-  %End the current sweep if the unresolved radius cannot be placed.
-  if ~placed, break; end
-  nextRadius=nextRadius+1;
- end
- %Avoid further relaxation when this pass made no geometric progress.
- if state.count==before, return; end
-
- %Settle the newly added boundary spheres before the next refill pass.
- state=spRelax(context,state,options.gravity,options,true);
- state=spRelax(context,state,options.gravity,options,false);
- if nextRadius>numel(radii), return; end
+%maxRefillPasses is the cumulative empty-sweep limit (paper Mr), not a cap
+%on successful insertion/compression cycles. Keep the legacy option name.
+if options.maxRefillPasses < 1
+ fprintf('[Refilling] Skipped: disabled (rejection limit < 1).\n');
+ return;
 end
+if nextRadius > numel(radii)
+ fprintf('[Refilling] Finished: prescribed radii exhausted; total %d/%d.\n',state.count,numel(radii));
+ return;
+end
+% Public callers already cache this; direct callers may supply columns or
+% unnormalised magnitudes too. Keep no-op exits above free of side effects.
+if ~isfield(context,'gravityFrame') || ~isequal(context.gravityFrame.direction,options.gravity)
+ context.gravityFrame=spGravityFrame(context,options.gravity);
+end
+gravity=context.gravityFrame.direction;
+% Ignore roundoff-sized projections of faces perpendicular to gravity.
+active = find(context.inwardNormals * gravity.' > 64*eps).';
+if isempty(active)
+ fprintf('[Refilling] Finished: no active faces; total %d/%d.\n',state.count,numel(radii));
+ return;
+end
+rejects=0; round=0; faceCount=numel(active);
+while rejects<options.maxRefillPasses && nextRadius<=numel(radii)
+ %N0/N1 are the actual newly inserted range across this complete traversal.
+ batchStart=state.count+1;
+ round=round+1; facesDone=0;
+ fprintf('[Refilling] Round %d | placement | faces 0/%d; added 0; total %d/%d\n', ...
+  round,faceCount,state.count,numel(radii));
+ progressClock=tic;
+ for faceIndex=1:faceCount
+  if nextRadius>numel(radii), break; end
+  id=active(faceIndex);
+  tri=context.vertices(context.faces(id,:),:); n=context.inwardNormals(id,:);
+  while nextRadius<=numel(radii)
+   r=radii(nextRadius); placed=false;
+   for attempt=1:options.maxAttempts
+    %Check time sparsely in long rejection runs; never print per candidate.
+    if (attempt==1 || mod(attempt,64)==0) && toc(progressClock)>=1
+     fprintf('[Refilling] Round %d | placement | faces %d/%d; added %d; total %d/%d\n', ...
+      round,facesDone,faceCount,state.count-batchStart+1,state.count,numel(radii));
+     progressClock=tic;
+    end
+    q=randomTrianglePoint(tri);
+    if spCanPlace(context,state,q+r*n,r)
+     state=spAddSphere(context,state,q+r*n,r);
+     state=spReportFillProgress(state,numel(radii));
+     placed=true;
+     break;
+    end
+   end
+   %Failure on this face leaves the same prescribed radius for the next face.
+   if ~placed, break; end
+   nextRadius=nextRadius+1;
+  end
+  facesDone=faceIndex;
+ end
+ fprintf('[Refilling] Round %d | placement done | faces %d/%d; added %d; total %d/%d\n', ...
+  round,facesDone,faceCount,state.count-batchStart+1,state.count,numel(radii));
+ if state.count<batchStart
+  %An empty batch has nothing to compress. Retry until Mr empty traversals.
+  rejects=rejects+1;
+  fprintf('[Refilling] Round %d | no new spheres; rejections %d/%d\n', ...
+   round,rejects,options.maxRefillPasses);
+ else
+  %Algorithm 2 then 3 for this batch only; old spheres remain obstacles.
+  progressPrefix=sprintf('[Refilling] Round %d',round);
+  state=spSettleBatch(context,state,options,batchStart,progressPrefix);
+ end
+end
+if nextRadius>numel(radii)
+ reason='prescribed radii exhausted';
+else
+ reason='rejection limit reached';
+end
+fprintf('[Refilling] Finished: %s; rounds %d; rejections %d/%d; total %d/%d\n', ...
+ reason,round,rejects,options.maxRefillPasses,state.count,numel(radii));
 end
 function q=randomTrianglePoint(tri)
 %RANDOMTRIANGLEPOINT Draw a uniform point from a triangular face.
