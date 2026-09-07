@@ -1,3 +1,5 @@
+![image](logo.png)
+
 **Haven't finished the User guide.** Contact me at:
 
 **hustler_lee@sjtu.edu.cn**
