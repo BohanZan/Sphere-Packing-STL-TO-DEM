@@ -3,20 +3,38 @@ function inside = spExactPointInside(context, point)
 %Locate the point's XY ray cell and reject empty projected regions quickly.
 index = floor((point(1:2)-context.lower(1:2))/context.xySize) + 1;
 index = min(max(index, 1), context.xyCount);
-key = sprintf('%d,%d', index(1), index(2));
-if ~isKey(context.xyCells, key)
-    inside = false;
-    return;
+if isfield(context,'xyKeySpec')
+    key=spCellKeys(index,context.xyKeySpec);
+elseif isa(context.xyCells,'containers.Map') && strcmp(context.xyCells.KeyType,'char')
+    key=sprintf('%d,%d',index);
+else
+    key=spCellKeys(index,context.xyCount);
 end
-
+if iscell(key), key=key{1}; end
 %Evaluate the selected finite projected triangles in one face-indexed batch.
-ids = context.xyCells(key);
+ids = spGridLookup(context.xyCells,key);
 ids = ids(:);
 if isempty(ids)
     inside = false;
     return;
 end
 ray = context.ray;
+% Coarse ray cells can contain many faces whose XY boxes miss this ray.
+% Keep original contexts without the optional precomputed bounds working.
+if isfield(ray, 'xyBoundsCells')
+    bounds = ray.xyBoundsCells(key);
+    keep = point(1) >= bounds(:,1) & point(1) <= bounds(:,3) & ...
+        point(2) >= bounds(:,2) & point(2) <= bounds(:,4);
+    ids = ids(keep);
+    if isempty(ids)
+        inside = false;
+        return;
+    end
+elseif isfield(ray, 'xyLower')
+    keep = point(1) >= ray.xyLower(ids,1) & point(1) <= ray.xyUpper(ids,1) & ...
+        point(2) >= ray.xyLower(ids,2) & point(2) <= ray.xyUpper(ids,2);
+    ids = ids(keep);
+end
 tolerance = context.tolerance;
 determinant = ray.determinant(ids);
 valid = abs(determinant) > tolerance^2;

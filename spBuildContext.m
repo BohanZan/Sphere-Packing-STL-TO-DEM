@@ -7,6 +7,12 @@ if nargin < 5 || isempty(occupancyOptions)
     occupancyOptions = struct('enabled', false, 'cellSize', [], 'maxCells', 2e6);
 end
 occupancyOptions = spNormaliseOccupancyOptions(occupancyOptions);
+validateattributes(maxRadius,{'numeric'},{'real','finite','scalar','positive'});
+if ~(isnumeric(buffer) && isreal(buffer) && isscalar(buffer) && ...
+        isfinite(buffer) && buffer>=0 && isfinite(2*maxRadius+buffer))
+    error('SpherePacking:InvalidGridBuffer', ...
+        'buffer must be finite and nonnegative, with finite grid spacing.');
+end
 
 %Read and bound the closed surface before selecting numerical scales.
 [vertices, faces] = readMesh(model);
@@ -22,52 +28,39 @@ fprintf('Bounding Box Dimensions Lx=%.8g; Ly=%.8g; Lz=%.8g\n', ...
 % internally so the same options work for micrometre and metre STL files.
 tolerance = max(tolerance * modelScale, 64 * eps(max(abs(vertices(:)))));
 
-%Measure face extents to keep each 3-D hash cell physically meaningful.
-triangleExtent = zeros(size(faces,1), 3);
-for id = 1:size(faces,1)
-    triangle = vertices(faces(id,:), :);
-    triangleExtent(id,:) = max(triangle, [], 1) - min(triangle, [], 1);
-end
-% Prefer a moderately finer grid when a coarse STL contains isolated large
-% faces. Each face is still indexed in every cell it spans, so this changes
-% candidate-list size only, not geometric coverage.
-largeFaceCellFloor = 0.5 * max(triangleExtent(:));
-cellSize = max(2 * maxRadius + buffer, largeFaceCellFloor);
+% Cell spacing >= the largest sphere diameter guarantees complete local
+% sphere queries. Triangles have no size restriction; a conservative finite
+% surface distance band covers every possible sphere-centre contact cell.
+cellSize = 2 * maxRadius + buffer;
 count = max(1, ceil((upper - lower) / cellSize));
+[~,cellKeySpec]=spCellKeys(ones(1,3),count);
+[~,xyKeySpec]=spCellKeys(ones(1,2),count(1:2));
 
 % A sparse hash is essential: the geometric grid can have billions of
 % possible cells while only cells touched by STL faces need storage.
-triCells = containers.Map('KeyType', 'char', 'ValueType', 'any');
+triangleKeyParts=cell(size(faces,1),1); triangleIdParts=triangleKeyParts;
+grid=struct('lower',lower,'cellSize',cellSize,'cellCount',count);
+rasterStats=struct('enumerated',0,'references',0);
 for id = 1:size(faces,1)
     tri = vertices(faces(id,:),:);
-    lo = toCell(min(tri,[],1)); hi = toCell(max(tri,[],1));
-    for ix = lo(1):hi(1)
-        for iy = lo(2):hi(2)
-            for iz = lo(3):hi(3)
-                key = cellKey([ix iy iz]);
-                if isKey(triCells, key), ids = triCells(key); else, ids = []; end
-                triCells(key) = [ids id];
-            end
-        end
-    end
+    [indices,~,stats]=spTriangleCellCandidates(tri,grid,(1+sqrt(3))*cellSize/2,tolerance);
+    rasterStats.enumerated=rasterStats.enumerated+stats.enumerated;
+    rasterStats.references=rasterStats.references+size(indices,1);
+    triangleKeyParts{id}=spCellKeys(indices,cellKeySpec);
+    triangleIdParts{id}=repmat(id,size(indices,1),1);
 end
+triCells=spBuildStaticGrid(vertcat(triangleKeyParts{:}),vertcat(triangleIdParts{:}),cellKeySpec.keyType);
+% Eq.10 covers every sphere-centre cell (r <= h/2), not just surface cells.
+% This is an index invariant, not a user-selectable approximation.
+triCells.centreCoverage=true;
+clear triangleKeyParts triangleIdParts
 
 %Store the downward-ray projection in the XY layers of the same main grid.
 %It remains a 2-D hash to avoid duplicating faces along Z, but shares the
 %main grid origin, edge length and XY cell partition exactly.
 xySize = cellSize;
 xyCount = count(1:2);
-xyCells = containers.Map('KeyType', 'char', 'ValueType', 'any');
-for id=1:size(faces,1)
-    tri=vertices(faces(id,:),1:2); lo=toXY(min(tri,[],1)); hi=toXY(max(tri,[],1));
-    for ix = lo(1):hi(1)
-        for iy = lo(2):hi(2)
-            key = xyKey([ix iy]);
-            if isKey(xyCells, key), ids = xyCells(key); else, ids = []; end
-            xyCells(key) = [ids id];
-        end
-    end
-end
+xyKeyParts=cell(size(faces,1),1); xyIdParts=xyKeyParts;
 
 %Precompute the face-indexed coefficients used by exact vertical ray tests.
 a = vertices(faces(:,1),:);
@@ -80,6 +73,24 @@ determinant = ab(:,1).*ac(:,2) - ab(:,2).*ac(:,1);
 ray = struct('a', a, 'ab', ab, 'ac', ac, 'determinant', determinant, ...
     'inverseDeterminant', 1./determinant, ...
     'zDelta', [b(:,3)-a(:,3), c(:,3)-a(:,3)]);
+% The parity test accepts barycentric coordinates slightly outside a face.
+% Expand projected bounds for that same tolerance and cancellation in thin
+% projections. These bounds only reject impossible hits; parity stays exact.
+projectionCondition = (sum(abs(ab),2)+sum(abs(ac),2)).^2 ./ abs(determinant);
+roundoff = 64 * eps(max(abs(vertices(:)))) * max(1, projectionCondition);
+padding = 2*tolerance*(abs(ab)+abs(ac)) + roundoff;
+ray.xyLower = min(min(a(:,1:2),b(:,1:2)),c(:,1:2)) - padding;
+ray.xyUpper = max(max(a(:,1:2),b(:,1:2)),c(:,1:2)) + padding;
+% The grid must cover exactly the same expanded projection as the ray test.
+% Invalid projections cannot contribute a hit and need no XY references.
+for id=find(abs(determinant)>tolerance^2).'
+    lo=toXY(ray.xyLower(id,:)); hi=toXY(ray.xyUpper(id,:));
+    [ix,iy]=ndgrid(lo(1):hi(1),lo(2):hi(2));
+    xyKeyParts{id}=spCellKeys([ix(:),iy(:)],xyKeySpec);
+    xyIdParts{id}=repmat(id,numel(ix),1);
+end
+xyCells=spBuildStaticGrid(vertcat(xyKeyParts{:}),vertcat(xyIdParts{:}),xyKeySpec.keyType);
+clear xyKeyParts xyIdParts
 
 %Cache the face geometry and orient each normal by the existing ray probe.
 faceVertices = reshape(vertices(faces.', :), 3, size(faces,1), 3);
@@ -89,7 +100,7 @@ rawNormals = cross(vertices(faces(:,2),:) - vertices(faces(:,1),:), ...
 rawNormals = rawNormals ./ vecnorm(rawNormals, 2, 2);
 probeContext = struct('vertices',vertices,'faces',faces,'lower',lower, ...
     'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells}, ...
-    'tolerance',tolerance,'ray',ray);
+    'tolerance',tolerance,'ray',ray,'xyKeySpec',xyKeySpec);
 probeDistance = max(tolerance*100, 1e-8*cellSize);
 inwardNormals = spOrientInwardNormals( ...
     faceCentres, rawNormals, probeDistance, probeContext);
@@ -99,7 +110,8 @@ context=struct('vertices',vertices,'faces',faces,'lower',lower,'upper',upper,...
     'cellSize',cellSize,'cellCount',count,'triangleCells',{triCells},...
     'xySize',xySize,'xyCount',xyCount,'xyCells',{xyCells},'tolerance',tolerance, ...
     'faceCentres',faceCentres,'inwardNormals',inwardNormals,'ray',ray, ...
-    'triangles',triangles);
+    'triangles',triangles,'cellKeySpec',cellKeySpec,'xyKeySpec',xyKeySpec, ...
+    'rasterStats',rasterStats);
 if occupancyOptions.enabled
     context.occupancy = spBuildOccupancyGrid(context, maxRadius, occupancyOptions);
 else
@@ -127,10 +139,12 @@ fprintf('========================================\n');
 
 %Encode 3-D and XY integer indices as containers.Map keys.
     function key = cellKey(index)
-        key = sprintf('%d,%d,%d', index(1), index(2), index(3));
+        key = spCellKeys(index,cellKeySpec);
+        if iscell(key), key=key{1}; end
     end
     function key = xyKey(index)
-        key = sprintf('%d,%d', index(1), index(2));
+        key = spCellKeys(index,xyKeySpec);
+        if iscell(key), key=key{1}; end
     end
 end
 

@@ -36,18 +36,30 @@ end
 function spWriteOccupiedGrid(pointsFile, cellsFile, context, state, coordinateShift)
 %SPWRITEOCCUPIEDGRID Write occupied sparse hash cells as ParaView-ready hexahedra.
 %Use cells containing either STL triangles or accepted sphere centres.
-cellKeys = unique([keys(context.triangleCells), keys(state.sphereCells)]);
+if isstruct(context.triangleCells)
+    triangleKeys=context.triangleCells.occupiedKeys;
+else
+    triangleKeys=keys(context.triangleCells);
+end
+if ~iscell(triangleKeys), triangleKeys=num2cell(triangleKeys); end
+cellKeys = [triangleKeys(:).', keys(state.sphereCells)];
+% Preserve the previous lexical export order (not numeric key order).
+indices = spCellIndices(cellKeys,context.cellCount);
+labels=cell(size(indices,1),1);
+for k=1:size(indices,1), labels{k}=sprintf('%d,%d,%d',indices(k,:)); end
+[~,order]=unique(labels);
+cellKeys=cellKeys(order); indices=indices(order,:);
 pointRows = zeros(8*numel(cellKeys), 4);
 cellRows = zeros(numel(cellKeys), 11);
 for cellId = 1:numel(cellKeys)
     %Recover this cell's physical bounds and apply the common output shift.
-    index = sscanf(cellKeys{cellId}, '%d,%d,%d').';
+    index = indices(cellId,:);
     lower = context.lower + (index - 1) .* context.cellSize - coordinateShift;
     upper = min(context.lower + (index - 1) .* context.cellSize + context.cellSize, context.upper) - coordinateShift;
 
     %Count local geometry and assign eight unique point identifiers.
     if isKey(state.sphereCells, cellKeys{cellId}), sphereCount = numel(state.sphereCells(cellKeys{cellId})); else, sphereCount = 0; end
-    if isKey(context.triangleCells, cellKeys{cellId}), triangleCount = numel(context.triangleCells(cellKeys{cellId})); else, triangleCount = 0; end
+    triangleCount=numel(spGridLookup(context.triangleCells,cellKeys(cellId)));
     pointIds = (cellId-1)*8 + (1:8);
     pointRows(pointIds,:) = [pointIds.', hexahedronCorners(lower, upper)];
     cellRows(cellId,:) = [cellId, pointIds, sphereCount, triangleCount];

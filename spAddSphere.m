@@ -10,5 +10,5 @@ state.count=state.count+1; state.centres(state.count,:)=centre; state.radii(stat
 %Register the new sphere under its current 3-D spatial cell.
 idx=spCellIndex(context,centre);
 state.cellIndices(state.count,:)=idx;
-spHashInsert(state.sphereCells,idx,state.count);
+spHashInsert(state.sphereCells,idx,state.count,context.cellKeySpec);
 end

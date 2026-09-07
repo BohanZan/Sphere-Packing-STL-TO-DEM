@@ -19,6 +19,8 @@ occupancy = struct('enabled', true, 'lower', context.lower, 'cellSize', width, .
     'cellCount', count, 'labels', []);
 labels = 3 * ones(count, 'uint8');
 margin = false(count);
+% Keep the original AABB margin: tolerant ray parity can change at projected
+% seams far from the physical surface. Surface-only components are unsafe.
 halo = max(context.tolerance, 8 * eps(max(abs(context.vertices(:)))));
 for triangleId = 1:size(context.faces, 1)
     triangle = context.vertices(context.faces(triangleId,:), :);

@@ -2,6 +2,17 @@ function distance = spPointTriangleDistance(point, triangle)
 %SPPOINTTRIANGLEDISTANCE Minimum distance to a finite triangle.
 %Classify the closest feature as a vertex, edge or triangle interior.
 a=triangle(1,:); b=triangle(2,:); c=triangle(3,:); ab=b-a; ac=c-a; ap=point-a;
+% Repeated/collinear vertices have no face region and must not divide by 0.
+if ~any(cross(ab,ac))
+    distance=inf;
+    for edge=[1 2;2 3;3 1].'
+        origin=triangle(edge(1),:); e=triangle(edge(2),:)-origin;
+        residual=point-origin; length2=dot(e,e);
+        if length2>0, residual=residual-max(0,min(1,dot(residual,e)/length2))*e; end
+        distance=min(distance,norm(residual));
+    end
+    return
+end
 
 %Test the Voronoi region of vertex A and the adjacent edge AB.
 d1=dot(ab,ap); d2=dot(ac,ap);

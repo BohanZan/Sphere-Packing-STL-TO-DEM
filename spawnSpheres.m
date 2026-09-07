@@ -18,6 +18,7 @@ options = spDefaultOptions(options, maxAttempts, buffer, model);
 occupancyOptions = struct('enabled', options.occupancyAcceleration, ...
     'cellSize', options.occupancyCellSize, 'maxCells', options.occupancyMaxCells);
 context = spBuildContext(model, max(radii), options.buffer, options.tolerance, occupancyOptions);
+context.gravityFrame = spGravityFrame(context, options.gravity);
 state = spEmptyState(context, numel(radii));
 
 %Generate and settle initial-packing batches following Algorithm 4.
@@ -43,14 +44,15 @@ while nextRadius <= numel(radii)
     end
 
     % A nonempty batch alone receives Algorithm 2 then Algorithm 3.
-    state = spRelax(context, state, options.gravity, options, true);
-    state = spRelax(context, state, options.gravity, options, false);
+    state = spRelax(context, state, options.gravity, options, true, batchStart);
+    state = spRelax(context, state, options.gravity, options, false, batchStart);
 
     % Stop initial packing when this batch reaches within one grid spacing
-    % of the upper Z boundary; unresolved radii proceed to refilling.
+    % of the support boundary opposite gravity; unresolved radii refill.
     batchIds = batchStart:state.count;
-    batchTop = max(state.centres(batchIds,3) + state.radii(batchIds));
-    if batchTop > context.upper(3) - context.cellSize
+    frame = context.gravityFrame;
+    batchTop = max((state.centres(batchIds,:)-frame.origin)*frame.up.' + state.radii(batchIds));
+    if batchTop > frame.height - context.cellSize
         break;
     end
 end
@@ -128,7 +130,9 @@ for k = 1:numel(names)
 end
 
 %Normalise the gravity direction and validate the requested output frame.
-options.gravity = options.gravity(:).' / norm(options.gravity);
+% Validate before preprocessing or generating any spheres.
+frame = spGravityFrame(struct('vertices',zeros(1,3)),options.gravity);
+options.gravity = frame.direction;
 options.coordinateFrame = char(lower(string(options.coordinateFrame)));
 if ~ismember(options.coordinateFrame, {'world', 'center_of_mass'})
     error('SpherePacking:InvalidCoordinateFrame', ...

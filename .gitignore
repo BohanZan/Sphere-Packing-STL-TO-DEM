@@ -6,3 +6,8 @@ results/
 tests/
 !tests/
 !tests/*.m
+build/
+*.obj
+*.pdb
+*.ilk
+cpp/benchmarks/output/
