@@ -1,6 +1,6 @@
 ![image](logo.png)
 
-**Haven't finished the User guide.** Contact me at:
+**The User guide might be obsolete.** Contact me at:
 
 **hustler_lee@sjtu.edu.cn**
 
@@ -13,6 +13,70 @@ bohzan@yandex.ru.
 It's easier to use the recommended faster branch in C++ language:
 
 `main-cpp`
+
+## User Guide
+
+### Versions
+
+- **C++ (recommended):** branch `main-cpp`. It is much faster than MATLAB. Use it for real runs.
+- **MATLAB:** this branch (`main`). Use it to study and change the algorithm itself.
+
+### Environment
+
+- Windows 10/11 x64.
+- **C++:** Windows PowerShell 5.1+, Visual Studio with x64 C++ build tools, Intel oneAPI DPC++/C++ Compiler (`icx-cl`, tested with 2025.2), CMake 3.24+, Ninja.
+- **MATLAB:** MATLAB R2025a (tested). No extra toolbox needed.
+
+### Dependencies
+
+- **C++:** none beyond the C++20 standard library.
+- **MATLAB:** `stlTools` (provides `stlRead`), installed from MATLAB Add-Ons. The Ray/Triangle and volume entries in the list below are not used by the code.
+
+### Input
+
+- Closed STL surface, ASCII or binary. Samples are in `inputs/`.
+- Radius: one value for all spheres, or an ordered list.
+
+### Run C++
+
+Run from the root of the C++ version:
+
+```powershell
+.\scripts\Build.ps1                                  # build and run tests (-NoTest skips tests)
+.\build\release\sphere_packing.exe --preset buddha   # Great Buddha, 44000 spheres (a few minutes)
+.\build\release\sphere_packing.exe --model inputs\greatBudda\greatBudda.stl --radius 0.3 --count 1000 --output results\my_run
+.\build\release\sphere_packing.exe --help            # all options
+```
+
+### Run MATLAB
+
+Run from the repo root in MATLAB:
+
+```matlab
+testRun   % Great Buddha case. Edit testRun.m for your own STL, radii and options.
+```
+
+Or in a terminal from the repo root: `matlab -batch "testRun"`
+
+Custom call:
+
+```matlab
+radii = repmat(0.3, 1000, 1);
+options = struct('outputDirectory', 'results/my_run', 'outputPrefix', 'my_run');
+[assembly, masses, totalVolume, inertia, report] = spawnSpheres('inputs/greatBudda/greatBudda.stl', radii, 60, 0, options);
+```
+
+### Output
+
+Each run writes four CSV files:
+
+- `<prefix>_spheres.csv`: id, x, y, z, radius, diameter, mass
+- `<prefix>_summary.csv`: counts, stop reason, volume, inertia
+- `<prefix>_grid_points.csv`, `<prefix>_grid_hexahedra.csv`: occupied grid cells, for visualisation
+
+By default, `<prefix>` is the STL name and files go to the STL folder. The Buddha preset writes to `results\Great_Budda_cpp`, and `testRun` writes to `results\Great_Budda`.
+
+If the spheres do not all fit, the run still succeeds with `stop_reason = capacity_reached`.
 
 Dependences for MATLAB version:
 ---
